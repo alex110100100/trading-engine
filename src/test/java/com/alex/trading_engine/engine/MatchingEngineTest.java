@@ -2,6 +2,7 @@ package com.alex.trading_engine.engine;
 
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
+import com.alex.trading_engine.model.Trade;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -164,5 +165,109 @@ class MatchingEngineTest {
 
         // Verify the buy order was not added to the bids book (since it was fully matched)
         assertFalse(matchingEngine.getBids().containsKey(31000.0));
+    }
+
+    @Test
+    void testPartialFillIncomingOrderRemainderResting() {
+        Order ask = new Order.Builder()
+                .id("ask1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(2)
+                .orderSide(OrderSide.SELL)
+                .build();
+        matchingEngine.processOrder(ask);
+
+        Order buy = new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(5)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+
+        // Ask fully filled and removed; buy partially filled: 3 should remain in bids
+        assertFalse(matchingEngine.getAsks().containsKey(31000.0));
+        assertTrue(matchingEngine.getBids().containsKey(31000.0));
+        assertEquals(1, matchingEngine.getBids().get(31000.0).size());
+        assertEquals(3.0, matchingEngine.getBids().get(31000.0).get("buy1").getRemainingQuantity());
+    }
+
+    @Test
+    void testPartialFillRestingOrderRemainderStaysInBook() {
+        Order ask = new Order.Builder()
+                .id("ask1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(5)
+                .orderSide(OrderSide.SELL)
+                .build();
+        matchingEngine.processOrder(ask);
+
+        Order buy = new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(2)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+
+        // Buy fully filled; ask partially filled: 3 should remain at 31000 in asks
+        assertFalse(matchingEngine.getBids().containsKey(31000.0));
+        assertTrue(matchingEngine.getAsks().containsKey(31000.0));
+        assertEquals(1, matchingEngine.getAsks().get(31000.0).size());
+        assertEquals(3.0, matchingEngine.getAsks().get(31000.0).get("ask1").getRemainingQuantity());
+    }
+
+    @Test
+    void testTradeRecordedOnMatch() {
+        Order ask = new Order.Builder()
+                .id("ask1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.SELL)
+                .build();
+        matchingEngine.processOrder(ask);
+
+        Order buy = new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+
+        assertEquals(1, matchingEngine.getTrades().size());
+        Trade trade = matchingEngine.getTrades().get(0);
+        assertEquals("buy1", trade.getBuyerOrderId());
+        assertEquals("ask1", trade.getSellerOrderId());
+        assertEquals("BTC/USD", trade.getSymbol());
+        assertEquals(31000.0, trade.getPrice());
+        assertEquals(1.0, trade.getQuantity());
+    }
+
+    @Test
+    void testMultiplePriceLevelsIncomingEatsThroughBook() {
+        matchingEngine.processOrder(new Order.Builder().id("ask1").symbol("BTC/USD").price(31000).quantity(1).orderSide(OrderSide.SELL).build());
+        matchingEngine.processOrder(new Order.Builder().id("ask2").symbol("BTC/USD").price(31100).quantity(1).orderSide(OrderSide.SELL).build());
+
+        Order buy = new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(31200)
+                .quantity(2)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+
+        // Both asks filled; two trades
+        assertTrue(matchingEngine.getAsks().isEmpty());
+        assertEquals(2, matchingEngine.getTrades().size());
+        assertEquals(31000.0, matchingEngine.getTrades().get(0).getPrice());
+        assertEquals(31100.0, matchingEngine.getTrades().get(1).getPrice());
     }
 }
