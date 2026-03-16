@@ -2,12 +2,14 @@ package com.alex.trading_engine.engine;
 
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
+import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Matches orders using price-time priority. Terminology:
@@ -24,18 +26,27 @@ public class MatchingEngine {
     private final TreeMap<Double, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
     private final List<Trade> trades = new ArrayList<>();
 
-    public void processOrder(Order order) {
+    /**
+     * Process an order: match against the book, add remainder if any.
+     * @return result with order id and status (ACCEPTED / PARTIALLY_FILLED / FILLED).
+     */
+    public ProcessOrderResult processOrder(Order order) {
+        double remainingQty;
         if (order.getOrderSide() == OrderSide.BUY) {
-            matchAgainstAsks(order);
+            remainingQty = matchAgainstAsks(order);
         } else {
-            matchAgainstBids(order);
+            remainingQty = matchAgainstBids(order);
         }
+        OrderStatus status = computeStatus(remainingQty, order.getQuantity());
+        return new ProcessOrderResult(order.getId(), status);
     }
 
-    /**
-     * Removes a resting order by id from the book (bids or asks).
-     * @return true if the order was found and removed, false if not in the book (e.g. already matched or unknown id).
-     */
+    private static OrderStatus computeStatus(double remainingQty, double originalQty) {
+        if (remainingQty <= 0) return OrderStatus.FILLED;
+        if (remainingQty < originalQty) return OrderStatus.PARTIALLY_FILLED;
+        return OrderStatus.ACCEPTED;
+    }
+
     public boolean cancelOrder(String orderId) {
         if (orderId == null || orderId.isBlank()) {
             return false;
@@ -61,8 +72,8 @@ public class MatchingEngine {
         return false;
     }
 
-    /** Incoming BUY matches against resting asks; any unfilled quantity is added to bids. */
-    private void matchAgainstAsks(Order buyOrder) {
+    /** Incoming BUY matches against resting asks; any unfilled quantity is added to bids. Returns quantity that ended up resting (0 if fully filled). */
+    private double matchAgainstAsks(Order buyOrder) {
         double remainingQty = buyOrder.getQuantity();
         String symbol = buyOrder.getSymbol();
 
@@ -94,10 +105,11 @@ public class MatchingEngine {
         }
 
         addRemainderToBook(buyOrder, remainingQty, bids);
+        return remainingQty;
     }
 
-    /** Incoming SELL matches against resting bids; any unfilled quantity is added to asks. */
-    private void matchAgainstBids(Order sellOrder) {
+    /** Incoming SELL matches against resting bids; any unfilled quantity is added to asks. Returns quantity that ended up resting (0 if fully filled). */
+    private double matchAgainstBids(Order sellOrder) {
         double remainingQty = sellOrder.getQuantity();
         String symbol = sellOrder.getSymbol();
 
@@ -129,6 +141,7 @@ public class MatchingEngine {
         }
 
         addRemainderToBook(sellOrder, remainingQty, asks);
+        return remainingQty;
     }
 
     private void addRemainderToBook(Order order, double remainingQty,
@@ -149,5 +162,28 @@ public class MatchingEngine {
     private void addToBook(Order order, TreeMap<Double, LinkedHashMap<String, BookEntry>> book) {
         book.computeIfAbsent(order.getPrice(), k -> new LinkedHashMap<>())
                 .put(order.getId(), new BookEntry(order, order.getQuantity()));
+    }
+
+    /**
+     * Returns a snapshot of the top of the book: up to {@code limit} price levels per side,
+     * each with total quantity at that level.
+     */
+    public OrderBookSnapshot getOrderBookSnapshot(int limit) {
+        List<OrderBookSnapshot.PriceLevel> bidLevels = levelsFromBook(bids, limit);
+        List<OrderBookSnapshot.PriceLevel> askLevels = levelsFromBook(asks, limit);
+        return new OrderBookSnapshot(bidLevels, askLevels);
+    }
+
+    private List<OrderBookSnapshot.PriceLevel> levelsFromBook(
+            TreeMap<Double, LinkedHashMap<String, BookEntry>> book, int limit) {
+        return book.entrySet().stream()
+                .limit(limit)
+                .map(e -> {
+                    double totalQty = e.getValue().values().stream()
+                            .mapToDouble(BookEntry::getRemainingQuantity)
+                            .sum();
+                    return new OrderBookSnapshot.PriceLevel(e.getKey(), totalQty);
+                })
+                .collect(Collectors.toList());
     }
 }

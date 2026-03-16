@@ -9,16 +9,19 @@ A simple trading engine implementation in Java, designed to match BUY and SELL o
 - **Quantity-aware matching**: Partial fills supported; an order can match across multiple price levels or leave a remainder resting in the book.
 - **Trades**: Every match (or partial fill) produces an immutable `Trade` record; `GET /trades` returns the list.
 - **Cancellation**: Resting orders can be cancelled via `DELETE /order/{id}`; returns 204 if cancelled, 404 if not found (e.g. already matched or unknown id).
+- **Structured responses**: `POST /order` returns `{ "orderId", "status" }` where status is `ACCEPTED`, `PARTIALLY_FILLED`, or `FILLED`.
+- **Order book**: `GET /orderbook?limit=10` returns top bid and ask levels (price and total quantity per level).
 
 ## How It Works
 
-1. Orders are submitted via a REST API (`POST /order`).
+1. Orders are submitted via a REST API (`POST /order`). The response includes the order id and status (ACCEPTED / PARTIALLY_FILLED / FILLED).
 2. The `MatchingEngine` processes orders:
    - **BUY** orders match against the best available **ASK**, then the next, until the order is filled or no ask crosses.
    - **SELL** orders match against the best available **BID** the same way.
 3. Any unfilled quantity is added to the order book. Each match is recorded as a `Trade`.
 4. `GET /trades` returns all trades in order.
 5. `DELETE /order/{id}` cancels a resting order (removes it from the book). Returns 204 No Content if cancelled, 404 if the order is not in the book.
+6. `GET /orderbook?limit=10` returns a snapshot of the top of the book: bids and asks, each with price and total quantity (default limit 10 levels per side).
 
 ### Price-Time Priority
 
@@ -49,6 +52,6 @@ When a new order arrives:
 
 ## Next Steps
 
-- Structured API responses (e.g. order status: ACCEPTED / PARTIALLY_FILLED / FILLED).
-- Order book endpoint (e.g. `GET /orderbook`).
+- Validation and error handling (e.g. `@Valid`, 400 for bad request, consistent error JSON).
+- Persistence for trades and optionally the order book.
 

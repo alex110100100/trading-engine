@@ -1,8 +1,11 @@
 package com.alex.trading_engine.controller;
 
 import com.alex.trading_engine.engine.MatchingEngine;
+import com.alex.trading_engine.engine.OrderBookSnapshot;
+import com.alex.trading_engine.engine.ProcessOrderResult;
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
+import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -56,15 +59,15 @@ public class OrderControllerTest {
                 .orderSide(OrderSide.BUY)
                 .build();
 
-        // Mock the MatchingEngine to do nothing when processing the order
-        doNothing().when(matchingEngine).processOrder(any(Order.class));
+        when(matchingEngine.processOrder(any(Order.class)))
+                .thenReturn(new ProcessOrderResult("order1", OrderStatus.ACCEPTED));
 
-        // Perform the POST request
         mockMvc.perform(post("/order")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(order)))
                 .andExpect(status().isOk())
-                .andExpect(content().string("Order received: order1"));
+                .andExpect(jsonPath("$.orderId").value("order1"))
+                .andExpect(jsonPath("$.status").value("ACCEPTED"));
     }
 
     @Test
@@ -99,5 +102,22 @@ public class OrderControllerTest {
         mockMvc.perform(delete("/order/unknown"))
                 .andExpect(status().isNotFound());
         verify(matchingEngine).cancelOrder("unknown");
+    }
+
+    @Test
+    void testGetOrderBook() throws Exception {
+        when(matchingEngine.getOrderBookSnapshot(10))
+                .thenReturn(new OrderBookSnapshot(
+                        List.of(new OrderBookSnapshot.PriceLevel(31000.0, 2.0)),
+                        List.of(new OrderBookSnapshot.PriceLevel(31100.0, 1.0))));
+
+        mockMvc.perform(get("/orderbook"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bids.length()").value(1))
+                .andExpect(jsonPath("$.bids[0].price").value(31000.0))
+                .andExpect(jsonPath("$.bids[0].totalQuantity").value(2.0))
+                .andExpect(jsonPath("$.asks.length()").value(1))
+                .andExpect(jsonPath("$.asks[0].price").value(31100.0))
+                .andExpect(jsonPath("$.asks[0].totalQuantity").value(1.0));
     }
 }

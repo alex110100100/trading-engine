@@ -1,6 +1,9 @@
 package com.alex.trading_engine.controller;
 
+import com.alex.trading_engine.controller.dto.OrderBookResponse;
+import com.alex.trading_engine.controller.dto.SubmitOrderResponse;
 import com.alex.trading_engine.engine.MatchingEngine;
+import com.alex.trading_engine.engine.OrderBookSnapshot;
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.Trade;
 import org.springframework.http.ResponseEntity;
@@ -17,14 +20,26 @@ public class OrderController {
     }
 
     @PostMapping("/order")
-    public String submitOrder(@RequestBody Order order) {
-        matchingEngine.processOrder(order);
-        return "Order received: " + order.getId();
+    public SubmitOrderResponse submitOrder(@RequestBody Order order) {
+        var result = matchingEngine.processOrder(order);
+        return new SubmitOrderResponse(result.orderId(), result.status());
     }
 
     @GetMapping("/trades")
     public List<Trade> getTrades() {
         return matchingEngine.getTrades();
+    }
+
+    @GetMapping("/orderbook")
+    public OrderBookResponse getOrderBook(@RequestParam(defaultValue = "10") int limit) {
+        OrderBookSnapshot snapshot = matchingEngine.getOrderBookSnapshot(limit);
+        List<OrderBookResponse.PriceLevel> bids = snapshot.bids().stream()
+                .map(p -> new OrderBookResponse.PriceLevel(p.price(), p.totalQuantity()))
+                .toList();
+        List<OrderBookResponse.PriceLevel> asks = snapshot.asks().stream()
+                .map(p -> new OrderBookResponse.PriceLevel(p.price(), p.totalQuantity()))
+                .toList();
+        return new OrderBookResponse(bids, asks);
     }
 
     @DeleteMapping("/order/{id}")
