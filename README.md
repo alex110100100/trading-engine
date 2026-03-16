@@ -8,6 +8,7 @@ A simple trading engine implementation in Java, designed to match BUY and SELL o
 - **Order Book**: Uses `TreeMap` and `LinkedHashMap` to maintain bids and asks with price-time priority.
 - **Quantity-aware matching**: Partial fills supported; an order can match across multiple price levels or leave a remainder resting in the book.
 - **Trades**: Every match (or partial fill) produces an immutable `Trade` record; `GET /trades` returns the list.
+- **Cancellation**: Resting orders can be cancelled via `DELETE /order/{id}`; returns 204 if cancelled, 404 if not found (e.g. already matched or unknown id).
 
 ## How It Works
 
@@ -17,6 +18,7 @@ A simple trading engine implementation in Java, designed to match BUY and SELL o
    - **SELL** orders match against the best available **BID** the same way.
 3. Any unfilled quantity is added to the order book. Each match is recorded as a `Trade`.
 4. `GET /trades` returns all trades in order.
+5. `DELETE /order/{id}` cancels a resting order (removes it from the book). Returns 204 No Content if cancelled, 404 if the order is not in the book.
 
 ### Price-Time Priority
 
@@ -47,7 +49,6 @@ When a new order arrives:
 
 ## Next Steps
 
-- Add support for order cancellation.
 - Structured API responses (e.g. order status: ACCEPTED / PARTIALLY_FILLED / FILLED).
 - Order book endpoint (e.g. `GET /orderbook`).
 

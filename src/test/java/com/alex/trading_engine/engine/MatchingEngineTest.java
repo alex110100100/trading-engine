@@ -270,4 +270,52 @@ class MatchingEngineTest {
         assertEquals(31000.0, matchingEngine.getTrades().get(0).getPrice());
         assertEquals(31100.0, matchingEngine.getTrades().get(1).getPrice());
     }
+
+    @Test
+    void testCancelOrderRemovesFromBids() {
+        Order buy = new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+        assertTrue(matchingEngine.getBids().get(30000.0).containsKey("buy1"));
+
+        assertTrue(matchingEngine.cancelOrder("buy1"));
+        assertFalse(matchingEngine.getBids().containsKey(30000.0));
+    }
+
+    @Test
+    void testCancelOrderRemovesFromAsks() {
+        Order sell = new Order.Builder()
+                .id("sell1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.SELL)
+                .build();
+        matchingEngine.processOrder(sell);
+        assertTrue(matchingEngine.getAsks().get(31000.0).containsKey("sell1"));
+
+        assertTrue(matchingEngine.cancelOrder("sell1"));
+        assertFalse(matchingEngine.getAsks().containsKey(31000.0));
+    }
+
+    @Test
+    void testCancelOrderUnknownIdReturnsFalse() {
+        assertFalse(matchingEngine.cancelOrder("unknown"));
+    }
+
+    @Test
+    void testCancelOrderAlreadyMatchedReturnsFalse() {
+        Order ask = new Order.Builder().id("ask1").symbol("BTC/USD").price(31000).quantity(1).orderSide(OrderSide.SELL).build();
+        Order buy = new Order.Builder().id("buy1").symbol("BTC/USD").price(31000).quantity(1).orderSide(OrderSide.BUY).build();
+        matchingEngine.processOrder(ask);
+        matchingEngine.processOrder(buy);
+        // Both matched; neither is in the book
+        assertFalse(matchingEngine.cancelOrder("ask1"));
+        assertFalse(matchingEngine.cancelOrder("buy1"));
+    }
 }

@@ -19,7 +19,9 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -79,5 +81,23 @@ public class OrderControllerTest {
                 .andExpect(jsonPath("$[0].symbol").value("BTC/USD"))
                 .andExpect(jsonPath("$[0].price").value(31000.0))
                 .andExpect(jsonPath("$[0].quantity").value(1.0));
+    }
+
+    @Test
+    void testCancelOrderReturnsNoContentWhenFound() throws Exception {
+        when(matchingEngine.cancelOrder("order1")).thenReturn(true);
+
+        mockMvc.perform(delete("/order/order1"))
+                .andExpect(status().isNoContent());
+        verify(matchingEngine).cancelOrder("order1");
+    }
+
+    @Test
+    void testCancelOrderReturnsNotFoundWhenNotInBook() throws Exception {
+        when(matchingEngine.cancelOrder("unknown")).thenReturn(false);
+
+        mockMvc.perform(delete("/order/unknown"))
+                .andExpect(status().isNotFound());
+        verify(matchingEngine).cancelOrder("unknown");
     }
 }

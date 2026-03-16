@@ -32,7 +32,36 @@ public class MatchingEngine {
         }
     }
 
+    /**
+     * Removes a resting order by id from the book (bids or asks).
+     * @return true if the order was found and removed, false if not in the book (e.g. already matched or unknown id).
+     */
+    public boolean cancelOrder(String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            return false;
+        }
+        if (removeFromBook(orderId, bids)) {
+            return true;
+        }
+        return removeFromBook(orderId, asks);
+    }
 
+    private boolean removeFromBook(String orderId, TreeMap<Double, LinkedHashMap<String, BookEntry>> book) {
+        for (Iterator<Map.Entry<Double, LinkedHashMap<String, BookEntry>>> it = book.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<Double, LinkedHashMap<String, BookEntry>> levelEntry = it.next();
+            LinkedHashMap<String, BookEntry> level = levelEntry.getValue();
+            if (level.containsKey(orderId)) {
+                level.remove(orderId);
+                if (level.isEmpty()) {
+                    it.remove();
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Incoming BUY matches against resting asks; any unfilled quantity is added to bids. */
     private void matchAgainstAsks(Order buyOrder) {
         double remainingQty = buyOrder.getQuantity();
         String symbol = buyOrder.getSymbol();
@@ -67,6 +96,7 @@ public class MatchingEngine {
         addRemainderToBook(buyOrder, remainingQty, bids);
     }
 
+    /** Incoming SELL matches against resting bids; any unfilled quantity is added to asks. */
     private void matchAgainstBids(Order sellOrder) {
         double remainingQty = sellOrder.getQuantity();
         String symbol = sellOrder.getSymbol();
