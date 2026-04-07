@@ -2,10 +2,10 @@ package com.alex.trading_engine.controller;
 
 import com.alex.trading_engine.controller.dto.OrderBookResponse;
 import com.alex.trading_engine.controller.dto.SubmitOrderResponse;
+import com.alex.trading_engine.controller.dto.TradeResponse;
 import com.alex.trading_engine.engine.MatchingEngine;
 import com.alex.trading_engine.engine.OrderBookSnapshot;
 import com.alex.trading_engine.model.Order;
-import com.alex.trading_engine.model.Trade;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,8 +26,10 @@ public class OrderController {
     }
 
     @GetMapping("/trades")
-    public List<Trade> getTrades() {
-        return matchingEngine.getTrades();
+    public List<TradeResponse> getTrades() {
+        return matchingEngine.getTrades().stream()
+                .map(TradeResponse::from)
+                .toList();
     }
 
     @GetMapping("/orderbook")
