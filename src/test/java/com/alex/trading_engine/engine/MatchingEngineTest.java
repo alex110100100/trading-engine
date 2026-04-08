@@ -41,7 +41,7 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Verify the ask was matched and removed
-        assertFalse(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
+        assertFalse(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
     }
 
     @Test
@@ -67,7 +67,7 @@ class MatchingEngineTest {
         matchingEngine.processOrder(sell);
 
         // Verify the bid was matched and removed
-        assertFalse(matchingEngine.getBids().containsKey(BigDecimal.valueOf(31000.0)));
+        assertFalse(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
     }
 
     @Test
@@ -102,8 +102,8 @@ class MatchingEngineTest {
         matchingEngine.processOrder(sell);
 
         // Verify the first bid was matched
-        assertFalse(matchingEngine.getBids().get(BigDecimal.valueOf(31000.0)).containsKey("bid1"));
-        assertTrue(matchingEngine.getBids().get(BigDecimal.valueOf(31000.0)).containsKey("bid2"));
+        assertFalse(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(31000.0)).containsKey("bid1"));
+        assertTrue(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(31000.0)).containsKey("bid2"));
     }
 
     @Test
@@ -118,9 +118,9 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Verify the buy order was added to the bids book
-        assertTrue(matchingEngine.getBids().containsKey(BigDecimal.valueOf(30000.0)));
-        assertEquals(1, matchingEngine.getBids().get(BigDecimal.valueOf(30000.0)).size());
-        assertTrue(matchingEngine.getBids().get(BigDecimal.valueOf(30000.0)).containsKey("buy1"));
+        assertTrue(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(30000.0)));
+        assertEquals(1, matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000.0)).size());
+        assertTrue(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000.0)).containsKey("buy1"));
     }
 
     @Test
@@ -135,9 +135,9 @@ class MatchingEngineTest {
         matchingEngine.processOrder(sell);
 
         // Verify the sell order was added to the asks book
-        assertTrue(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
-        assertEquals(1, matchingEngine.getAsks().get(BigDecimal.valueOf(31000.0)).size());
-        assertTrue(matchingEngine.getAsks().get(BigDecimal.valueOf(31000.0)).containsKey("sell1"));
+        assertTrue(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
+        assertEquals(1, matchingEngine.getAsks("BTC/USD").get(BigDecimal.valueOf(31000.0)).size());
+        assertTrue(matchingEngine.getAsks("BTC/USD").get(BigDecimal.valueOf(31000.0)).containsKey("sell1"));
     }
 
     @Test
@@ -163,10 +163,10 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Verify the ask was matched and removed
-        assertFalse(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
+        assertFalse(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
 
         // Verify the buy order was not added to the bids book (since it was fully matched)
-        assertFalse(matchingEngine.getBids().containsKey(BigDecimal.valueOf(31000.0)));
+        assertFalse(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
     }
 
     @Test
@@ -190,10 +190,10 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Ask fully filled and removed; buy partially filled: 3 should remain in bids
-        assertFalse(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
-        assertTrue(matchingEngine.getBids().containsKey(BigDecimal.valueOf(31000.0)));
-        assertEquals(1, matchingEngine.getBids().get(BigDecimal.valueOf(31000.0)).size());
-        assertEquals(0, BigDecimal.valueOf(3.0).compareTo(matchingEngine.getBids().get(BigDecimal.valueOf(31000.0)).get("buy1").getRemainingQuantity()));
+        assertFalse(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
+        assertTrue(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
+        assertEquals(1, matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(31000.0)).size());
+        assertEquals(0, BigDecimal.valueOf(3.0).compareTo(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(31000.0)).get("buy1").getRemainingQuantity()));
     }
 
     @Test
@@ -217,10 +217,10 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Buy fully filled; ask partially filled: 3 should remain at 31000 in asks
-        assertFalse(matchingEngine.getBids().containsKey(BigDecimal.valueOf(31000.0)));
-        assertTrue(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
-        assertEquals(1, matchingEngine.getAsks().get(BigDecimal.valueOf(31000.0)).size());
-        assertEquals(0, BigDecimal.valueOf(3.0).compareTo(matchingEngine.getAsks().get(BigDecimal.valueOf(31000.0)).get("ask1").getRemainingQuantity()));
+        assertFalse(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
+        assertTrue(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
+        assertEquals(1, matchingEngine.getAsks("BTC/USD").get(BigDecimal.valueOf(31000.0)).size());
+        assertEquals(0, BigDecimal.valueOf(3.0).compareTo(matchingEngine.getAsks("BTC/USD").get(BigDecimal.valueOf(31000.0)).get("ask1").getRemainingQuantity()));
     }
 
     @Test
@@ -267,7 +267,7 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         // Both asks filled; two trades
-        assertTrue(matchingEngine.getAsks().isEmpty());
+        assertTrue(matchingEngine.getAsks("BTC/USD").isEmpty());
         assertEquals(2, matchingEngine.getTrades().size());
         assertEquals(0, BigDecimal.valueOf(31000.0).compareTo(matchingEngine.getTrades().get(0).getPrice()));
         assertEquals(0, BigDecimal.valueOf(31100.0).compareTo(matchingEngine.getTrades().get(1).getPrice()));
@@ -283,10 +283,10 @@ class MatchingEngineTest {
                 .orderSide(OrderSide.BUY)
                 .build();
         matchingEngine.processOrder(buy);
-        assertTrue(matchingEngine.getBids().get(BigDecimal.valueOf(30000.0)).containsKey("buy1"));
+        assertTrue(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000.0)).containsKey("buy1"));
 
         assertTrue(matchingEngine.cancelOrder("buy1"));
-        assertFalse(matchingEngine.getBids().containsKey(BigDecimal.valueOf(30000.0)));
+        assertFalse(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(30000.0)));
     }
 
     @Test
@@ -299,10 +299,10 @@ class MatchingEngineTest {
                 .orderSide(OrderSide.SELL)
                 .build();
         matchingEngine.processOrder(sell);
-        assertTrue(matchingEngine.getAsks().get(BigDecimal.valueOf(31000.0)).containsKey("sell1"));
+        assertTrue(matchingEngine.getAsks("BTC/USD").get(BigDecimal.valueOf(31000.0)).containsKey("sell1"));
 
         assertTrue(matchingEngine.cancelOrder("sell1"));
-        assertFalse(matchingEngine.getAsks().containsKey(BigDecimal.valueOf(31000.0)));
+        assertFalse(matchingEngine.getAsks("BTC/USD").containsKey(BigDecimal.valueOf(31000.0)));
     }
 
     @Test
@@ -319,5 +319,34 @@ class MatchingEngineTest {
         // Both matched; neither is in the book
         assertFalse(matchingEngine.cancelOrder("ask1"));
         assertFalse(matchingEngine.cancelOrder("buy1"));
+    }
+
+    @Test
+    void testSymbolsDoNotCrossMatch() {
+        matchingEngine.processOrder(new Order.Builder()
+                .id("eth-ask")
+                .symbol("ETH/USD")
+                .price(2000)
+                .quantity(1)
+                .orderSide(OrderSide.SELL)
+                .build());
+        matchingEngine.processOrder(new Order.Builder()
+                .id("btc-buy")
+                .symbol("BTC/USD")
+                .price(2000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        assertTrue(matchingEngine.getAsks("ETH/USD").containsKey(BigDecimal.valueOf(2000)));
+        assertTrue(matchingEngine.getBids("BTC/USD").containsKey(BigDecimal.valueOf(2000)));
+        assertTrue(matchingEngine.getTrades().isEmpty());
+    }
+
+    @Test
+    void testGetOrderBookSnapshotUnknownSymbolReturnsEmpty() {
+        OrderBookSnapshot snap = matchingEngine.getOrderBookSnapshot("UNKNOWN/PAIR", 10);
+        assertTrue(snap.bids().isEmpty());
+        assertTrue(snap.asks().isEmpty());
     }
 }

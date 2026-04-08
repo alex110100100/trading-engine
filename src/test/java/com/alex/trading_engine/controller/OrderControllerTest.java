@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -31,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(OrderController.class)
+@Import(GlobalExceptionHandler.class)
 public class OrderControllerTest {
 
     @Autowired
@@ -105,12 +108,12 @@ public class OrderControllerTest {
 
     @Test
     void testGetOrderBook() throws Exception {
-        when(matchingEngine.getOrderBookSnapshot(10))
+        when(matchingEngine.getOrderBookSnapshot("BTC/USD", 10))
                 .thenReturn(new OrderBookSnapshot(
                         List.of(new OrderBookSnapshot.PriceLevel(BigDecimal.valueOf(31000.0), BigDecimal.valueOf(2.0))),
                         List.of(new OrderBookSnapshot.PriceLevel(BigDecimal.valueOf(31100.0), BigDecimal.valueOf(1.0)))));
 
-        mockMvc.perform(get("/orderbook"))
+        mockMvc.perform(get("/orderbook").param("symbol", "BTC/USD"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bids.length()").value(1))
                 .andExpect(jsonPath("$.bids[0].price").value(31000.0))
@@ -118,6 +121,41 @@ public class OrderControllerTest {
                 .andExpect(jsonPath("$.asks.length()").value(1))
                 .andExpect(jsonPath("$.asks[0].price").value(31100.0))
                 .andExpect(jsonPath("$.asks[0].totalQuantity").value(1.0));
+        verify(matchingEngine).getOrderBookSnapshot("BTC/USD", 10);
+    }
+
+    @Test
+    void testGetOrderBookUsesDefaultLimitWhenOmitted() throws Exception {
+        when(matchingEngine.getOrderBookSnapshot("ETH/USD", 10))
+                .thenReturn(new OrderBookSnapshot(List.of(), List.of()));
+
+        mockMvc.perform(get("/orderbook").param("symbol", "ETH/USD"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bids.length()").value(0))
+                .andExpect(jsonPath("$.asks.length()").value(0));
+        verify(matchingEngine).getOrderBookSnapshot(eq("ETH/USD"), eq(10));
+    }
+
+    @Test
+    void testGetOrderBookMissingSymbolReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/orderbook"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Validation failed"));
+    }
+
+    @Test
+    void testGetOrderBookBlankSymbolReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/orderbook").param("symbol", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void testGetOrderBookInvalidLimitReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/orderbook").param("symbol", "BTC/USD").param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
     }
 
     @Test

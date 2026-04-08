@@ -1,202 +1,85 @@
 package com.alex.trading_engine.engine;
 
 import com.alex.trading_engine.model.Order;
-import com.alex.trading_engine.model.OrderSide;
-import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Matches orders using price-time priority. Terminology:
- * <ul>
- *   <li><b>Incoming</b> – the order just submitted.</li>
- *   <li><b>Resting</b> – an order already in the book waiting to be matched (the "other side").</li>
- * </ul>
+ * Routes orders to a per-symbol {@link OrderBook}. Symbols are isolated: no cross-instrument matching.
  */
 @Service
 @Getter
 public class MatchingEngine {
-    // Two order books: Bids (sorted highest first) and Asks (sorted lowest first); each level holds BookEntry for partial-fill tracking
-    private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> bids = new TreeMap<>(Comparator.reverseOrder());
-    private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
-    private final List<Trade> trades = new ArrayList<>();
 
-    /**
-     * Process an order: match against the book, add remainder if any.
-     * @return result with order id and status (ACCEPTED / PARTIALLY_FILLED / FILLED).
-     */
-    public ProcessOrderResult processOrder(Order order) {
-        BigDecimal remainingQty;
-        if (order.getOrderSide() == OrderSide.BUY) {
-            remainingQty = matchAgainstAsks(order);
-        } else {
-            remainingQty = matchAgainstBids(order);
-        }
-        OrderStatus status = computeStatus(remainingQty, order.getQuantity());
-        return new ProcessOrderResult(order.getId(), status);
+    private final Map<String, OrderBook> books = new ConcurrentHashMap<>();
+
+    private OrderBook bookFor(String symbol) {
+        return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
 
-    private static OrderStatus computeStatus(BigDecimal remainingQty, BigDecimal originalQty) {
-        if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) return OrderStatus.FILLED;
-        if (remainingQty.compareTo(originalQty) < 0) return OrderStatus.PARTIALLY_FILLED;
-        return OrderStatus.ACCEPTED;
+    public ProcessOrderResult processOrder(Order order) {
+        return bookFor(order.getSymbol()).processOrder(order);
     }
 
     public boolean cancelOrder(String orderId) {
         if (orderId == null || orderId.isBlank()) {
             return false;
         }
-        if (removeFromBook(orderId, bids)) {
-            return true;
-        }
-        return removeFromBook(orderId, asks);
-    }
-
-    private boolean removeFromBook(String orderId, TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
-        for (Iterator<Map.Entry<BigDecimal, LinkedHashMap<String, BookEntry>>> it = book.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<BigDecimal, LinkedHashMap<String, BookEntry>> levelEntry = it.next();
-            LinkedHashMap<String, BookEntry> level = levelEntry.getValue();
-            if (level.containsKey(orderId)) {
-                level.remove(orderId);
-                if (level.isEmpty()) {
-                    it.remove();
-                }
+        for (OrderBook book : books.values()) {
+            if (book.cancelOrder(orderId)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** Incoming BUY matches against resting asks; any unfilled quantity is added to bids. Returns quantity that ended up resting (0 if fully filled). */
-    private BigDecimal matchAgainstAsks(Order buyOrder) {
-        BigDecimal remainingQty = buyOrder.getQuantity();
-        String symbol = buyOrder.getSymbol();
-
-        while (remainingQty.compareTo(BigDecimal.ZERO) > 0 && !asks.isEmpty()) {
-            BigDecimal bestAskPrice = asks.firstKey();
-            if (buyOrder.getPrice().compareTo(bestAskPrice) < 0) {
-                break;
-            }
-            LinkedHashMap<String, BookEntry> level = asks.get(bestAskPrice);
-            if (level.isEmpty()) {
-                asks.remove(bestAskPrice);
-                continue;
-            }
-            Map.Entry<String, BookEntry> first = level.entrySet().iterator().next();
-            String restingOrderId = first.getKey();
-            BookEntry resting = first.getValue();
-            BigDecimal tradeQty = remainingQty.min(resting.getRemainingQuantity());
-
-            trades.add(new Trade(
-                    buyOrder.getId(),
-                    restingOrderId,
-                    symbol,
-                    bestAskPrice,
-                    tradeQty,
-                    Instant.now()));
-
-            resting.reduceBy(tradeQty);
-            if (resting.isFilled()) {
-                level.remove(restingOrderId);
-                if (level.isEmpty()) {
-                    asks.remove(bestAskPrice);
-                }
-            }
-            remainingQty = remainingQty.subtract(tradeQty);
-        }
-
-        addRemainderToBook(buyOrder, remainingQty, bids);
-        return remainingQty;
-    }
-
-    /** Incoming SELL matches against resting bids; any unfilled quantity is added to asks. Returns quantity that ended up resting (0 if fully filled). */
-    private BigDecimal matchAgainstBids(Order sellOrder) {
-        BigDecimal remainingQty = sellOrder.getQuantity();
-        String symbol = sellOrder.getSymbol();
-
-        while (remainingQty.compareTo(BigDecimal.ZERO) > 0 && !bids.isEmpty()) {
-            BigDecimal bestBidPrice = bids.firstKey();
-            if (sellOrder.getPrice().compareTo(bestBidPrice) > 0) {
-                break;
-            }
-            LinkedHashMap<String, BookEntry> level = bids.get(bestBidPrice);
-            if (level.isEmpty()) {
-                bids.remove(bestBidPrice);
-                continue;
-            }
-            Map.Entry<String, BookEntry> first = level.entrySet().iterator().next();
-            String restingOrderId = first.getKey();
-            BookEntry resting = first.getValue();
-            BigDecimal tradeQty = remainingQty.min(resting.getRemainingQuantity());
-
-            trades.add(new Trade(
-                    restingOrderId,
-                    sellOrder.getId(),
-                    symbol,
-                    bestBidPrice,
-                    tradeQty,
-                    Instant.now()));
-
-            resting.reduceBy(tradeQty);
-            if (resting.isFilled()) {
-                level.remove(restingOrderId);
-                if (level.isEmpty()) {
-                    bids.remove(bestBidPrice);
-                }
-            }
-            remainingQty = remainingQty.subtract(tradeQty);
-        }
-
-        addRemainderToBook(sellOrder, remainingQty, asks);
-        return remainingQty;
-    }
-
-    private void addRemainderToBook(Order order, BigDecimal remainingQty,
-                                    TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
-        if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-        Order remainder = new Order.Builder()
-                .id(order.getId())
-                .symbol(order.getSymbol())
-                .price(order.getPrice())
-                .quantity(remainingQty)
-                .orderSide(order.getOrderSide())
-                .build();
-        addToBook(remainder, book);
-    }
-
-    private void addToBook(Order order, TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
-        book.computeIfAbsent(order.getPrice(), k -> new LinkedHashMap<>())
-                .put(order.getId(), new BookEntry(order, order.getQuantity()));
+    /**
+     * All trades across symbols, merged and sorted for a deterministic list.
+     * <p>
+     * Primary sort: {@link Trade#getTimestamp()}. If two trades share the same instant (possible when
+     * several matches occur in the same JVM clock tick), timestamps compare equal, so we break ties
+     * with buyer order id, then seller order id. That way the order is stable across runs and tests,
+     * not dependent on hash-map iteration or stream merge order.
+     */
+    public List<Trade> getTrades() {
+        return books.values().stream()
+                .flatMap(b -> b.getTrades().stream())
+                .sorted(Comparator.comparing(Trade::getTimestamp).thenComparing(Trade::getBuyerOrderId).thenComparing(Trade::getSellerOrderId))
+                .collect(Collectors.toList());
     }
 
     /**
-     * Returns a snapshot of the top of the book: up to {@code limit} price levels per side,
-     * each with total quantity at that level.
+     * Snapshot for one symbol. Unknown or never-used symbol returns empty bids/asks.
      */
-    public OrderBookSnapshot getOrderBookSnapshot(int limit) {
-        List<OrderBookSnapshot.PriceLevel> bidLevels = levelsFromBook(bids, limit);
-        List<OrderBookSnapshot.PriceLevel> askLevels = levelsFromBook(asks, limit);
-        return new OrderBookSnapshot(bidLevels, askLevels);
+    public OrderBookSnapshot getOrderBookSnapshot(String symbol, int limit) {
+        OrderBook book = books.get(symbol);
+        if (book == null) {
+            return new OrderBookSnapshot(List.of(), List.of());
+        }
+        return book.getSnapshot(limit);
     }
 
-    private List<OrderBookSnapshot.PriceLevel> levelsFromBook(
-            TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book, int limit) {
-        return book.entrySet().stream()
-                .limit(limit)
-                .map(e -> {
-                    BigDecimal totalQty = e.getValue().values().stream()
-                            .map(BookEntry::getRemainingQuantity)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    return new OrderBookSnapshot.PriceLevel(e.getKey(), totalQty);
-                })
-                .collect(Collectors.toList());
+    /** For tests / inspection: bids for a symbol (empty book if none). */
+    public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getBids(String symbol) {
+        OrderBook b = books.get(symbol);
+        if (b == null) {
+            return new TreeMap<>(Comparator.reverseOrder());
+        }
+        return b.getBids();
+    }
+
+    /** For tests / inspection: asks for a symbol (empty book if none). */
+    public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getAsks(String symbol) {
+        OrderBook b = books.get(symbol);
+        if (b == null) {
+            return new TreeMap<>();
+        }
+        return b.getAsks();
     }
 }
