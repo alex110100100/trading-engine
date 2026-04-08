@@ -1,0 +1,11 @@
+package com.alex.trading_engine.controller.dto;
+
+import java.time.Instant;
+import java.util.Map;
+
+public record ApiErrorResponse(
+        Instant timestamp,
+        int status,
+        String message,
+        Map<String, String> fieldErrors
+) {}

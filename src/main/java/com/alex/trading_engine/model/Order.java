@@ -88,18 +88,6 @@ public class Order {
         }
 
         public Order build() {
-            if (symbol == null || symbol.trim().isEmpty()) {
-                throw new IllegalArgumentException("Symbol is required");
-            }
-
-            if (orderSide == null) {
-                throw new IllegalArgumentException("OrderSide is required");
-            }
-
-            if (quantity <= 0) {
-                throw new IllegalArgumentException("Quantity must be positive");
-            }
-
             return new Order(this);
         }
     }

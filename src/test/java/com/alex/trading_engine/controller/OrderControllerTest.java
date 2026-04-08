@@ -134,6 +134,31 @@ public class OrderControllerTest {
         mockMvc.perform(post("/order")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidBody))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.symbol").exists())
+                .andExpect(jsonPath("$.fieldErrors.quantity").exists());
+    }
+
+    @Test
+    void testSubmitOrderMalformedBodyReturnsBadRequest() throws Exception {
+        String invalidEnumBody = """
+                {
+                  "id": "order1",
+                  "symbol": "BTC/USD",
+                  "price": 31000,
+                  "quantity": 1,
+                  "orderSide": "BID"
+                }
+                """;
+
+        mockMvc.perform(post("/order")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidEnumBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Malformed request body"))
+                .andExpect(jsonPath("$.fieldErrors").isMap());
     }
 }
