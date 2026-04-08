@@ -1,57 +1,81 @@
 # Trading Engine
 
-A simple trading engine implementation in Java, designed to match BUY and SELL orders based on price-time priority.
+A small **Spring Boot** trading engine in Java: submit orders, match by **price–time priority**, and inspect trades and **per-symbol** order books. Prices and quantities use **`BigDecimal`** in the domain and JSON.
 
-## Features
+## Requirements
 
-- **Order Types**: Supports `BUY` and `SELL` orders.
-- **Order Book**: Uses `TreeMap` and `LinkedHashMap` to maintain bids and asks with price-time priority.
-- **Quantity-aware matching**: Partial fills supported; an order can match across multiple price levels or leave a remainder resting in the book.
-- **Trades**: Every match (or partial fill) produces an immutable `Trade` record; `GET /trades` returns the list.
-- **Cancellation**: Resting orders can be cancelled via `DELETE /order/{id}`; returns 204 if cancelled, 404 if not found (e.g. already matched or unknown id).
-- **Structured responses**: `POST /order` returns `{ "orderId", "status" }` where status is `ACCEPTED`, `PARTIALLY_FILLED`, or `FILLED`.
-- **Order book**: `GET /orderbook?limit=10` returns top bid and ask levels (price and total quantity per level).
+- **Java 17**
+- **Maven**
 
-## How It Works
 
-1. Orders are submitted via a REST API (`POST /order`). The response includes the order id and status (ACCEPTED / PARTIALLY_FILLED / FILLED).
-2. The `MatchingEngine` processes orders:
-   - **BUY** orders match against the best available **ASK**, then the next, until the order is filled or no ask crosses.
-   - **SELL** orders match against the best available **BID** the same way.
-3. Any unfilled quantity is added to the order book. Each match is recorded as a `Trade`.
-4. `GET /trades` returns all trades in order.
-5. `DELETE /order/{id}` cancels a resting order (removes it from the book). Returns 204 No Content if cancelled, 404 if the order is not in the book.
-6. `GET /orderbook?limit=10` returns a snapshot of the top of the book: bids and asks, each with price and total quantity (default limit 10 levels per side).
+## API
 
-### Price-Time Priority
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/order` | Submit an order (JSON body). Returns `{ "orderId", "status" }` with status `ACCEPTED`, `PARTIALLY_FILLED`, or `FILLED`. |
+| `GET` | `/trades` | All trades across symbols, merged and sorted by execution time (deterministic tie-break). |
+| `GET` | `/orderbook?symbol=&limit=` | Snapshot of top bid/ask **levels for one symbol** (e.g. `BTC/USD`). `symbol` is required; `limit` defaults to `10`, minimum `1`. |
+| `DELETE` | `/order/{id}` | Cancel a **resting** order by id (scans all symbol books). **204** if removed, **404** if not found. |
 
-The trading engine ensures **price-time priority** for order matching:
+### OpenAPI / Swagger UI
 
-- **Price Priority**: Orders are matched based on their price. Better prices (higher for bids, lower for asks) take precedence.
-- **Time Priority**: If two orders have the same price, the one that arrived first is matched first.
+With the app running, interactive docs and “Try it out” are at:
 
-#### Implementation Details
+**http://localhost:8080/swagger-ui.html**
 
-- **Bids**: Stored in a `TreeMap<Double, LinkedHashMap<String, BookEntry>>` sorted in **descending order** (highest bid first).
-- **Asks**: Stored in a `TreeMap<Double, LinkedHashMap<String, BookEntry>>` sorted in **ascending order** (lowest ask first).
-- At each price level, orders are stored as `BookEntry` (order + remaining quantity) in a `LinkedHashMap` for **insertion order** (time priority) and partial-fill tracking.
+Raw OpenAPI JSON: **http://localhost:8080/v3/api-docs**
 
-Example:
+### Example: submit order
 
-- **Bids**:
-  - `31000.0`: [Order1, Order2] (Order1 arrived first)
-  - `30900.0`: [Order3]
-- **Asks**:
-  - `31100.0`: [Order4, Order5] (Order4 arrived first)
-  - `31200.0`: [Order6]
+```bash
+curl -s -X POST http://localhost:8080/order \
+  -H "Content-Type: application/json" \
+  -d '{"id":"o1","symbol":"BTC/USD","side":"BUY","price":"50000","quantity":"0.1"}'
+```
 
-When a new order arrives:
+### Validation and errors
 
-- A **buy order** at `31100.0` matches with `Order4` (best ask price, first in time).
-- A **sell order** at `31000.0` matches with `Order1` (best bid price, first in time).
+Request bodies and query parameters are validated. Typical responses:
 
-## Next Steps
+- **400** — invalid JSON, missing required fields, or constraint violations (e.g. blank `symbol`, `limit` below 1).
 
-- Validation and error handling (e.g. `@Valid`, 400 for bad request, consistent error JSON).
-- Persistence for trades and optionally the order book.
+Error body shape (`application/json`):
 
+```json
+{
+  "timestamp": "2026-04-08T12:00:00Z",
+  "status": 400,
+  "message": "Validation failed",
+  "fieldErrors": {
+    "symbol": "symbol is required",
+    "quantity": "must be greater than 0"
+  }
+}
+```
+
+`fieldErrors` may be empty for non-field errors (e.g. malformed JSON).
+
+## How matching works
+
+1. **`MatchingEngine`** routes each order to an **`OrderBook`** for its **`symbol`** (books are created on demand).
+2. **BUY** matches against the best **ask** prices; **SELL** against the best **bid** prices, until filled or nothing crosses.
+3. Partial fills are supported; remainder rests in that symbol’s book.
+4. Each execution produces an immutable **`Trade`**; **`GET /trades`** aggregates trades from all books.
+
+### Price–time priority
+
+- **Price**: Better prices first (higher bid, lower ask).
+- **Time**: At the same price, earlier orders match first (**`LinkedHashMap`** insertion order per level).
+
+#### Implementation (per symbol)
+
+- **Bids**: `TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>>` — **descending** key order (best bid first).
+- **Asks**: `TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>>` — **ascending** key order (best ask first).
+- Each **`BookEntry`** tracks remaining quantity for partial fills.
+
+
+## Next steps (ideas)
+
+- Concurrency (single-writer / partitioned books).
+- Persistence for trades and recovery.
+- `GET /order/{id}` for order status.

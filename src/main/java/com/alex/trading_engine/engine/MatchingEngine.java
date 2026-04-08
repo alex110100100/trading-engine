@@ -44,8 +44,7 @@ public class MatchingEngine {
      * <p>
      * Primary sort: {@link Trade#getTimestamp()}. If two trades share the same instant (possible when
      * several matches occur in the same JVM clock tick), timestamps compare equal, so we break ties
-     * with buyer order id, then seller order id. That way the order is stable across runs and tests,
-     * not dependent on hash-map iteration or stream merge order.
+     * with buyer order id, then seller order id.
      */
     public List<Trade> getTrades() {
         return books.values().stream()
