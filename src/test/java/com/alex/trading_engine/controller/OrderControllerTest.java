@@ -21,13 +21,11 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -119,5 +117,23 @@ public class OrderControllerTest {
                 .andExpect(jsonPath("$.asks.length()").value(1))
                 .andExpect(jsonPath("$.asks[0].price").value(31100.0))
                 .andExpect(jsonPath("$.asks[0].totalQuantity").value(1.0));
+    }
+
+    @Test
+    void testSubmitOrderValidationFailureReturnsBadRequest() throws Exception {
+        String invalidBody = """
+                {
+                  "id": "order1",
+                  "symbol": "",
+                  "price": 31000,
+                  "quantity": 0,
+                  "orderSide": "BUY"
+                }
+                """;
+
+        mockMvc.perform(post("/order")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidBody))
+                .andExpect(status().isBadRequest());
     }
 }

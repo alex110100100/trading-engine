@@ -2,6 +2,9 @@ package com.alex.trading_engine.model;
 
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 
 import java.time.Instant;
@@ -15,9 +18,13 @@ import java.util.UUID;
 @Getter
 public class Order {
     private final String id;
+    @NotBlank(message = "symbol is required")
     private final String symbol; // e.g., "BTC/USD"
+    @DecimalMin(value = "0.0", inclusive = false, message = "price must be positive")
     private final double price;
+    @DecimalMin(value = "0.0", inclusive = false, message = "quantity must be positive")
     private final double quantity;
+    @NotNull(message = "orderSide is required")
     private final OrderSide orderSide;
     private final Instant timestamp;
 

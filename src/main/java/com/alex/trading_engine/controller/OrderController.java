@@ -6,6 +6,7 @@ import com.alex.trading_engine.controller.dto.TradeResponse;
 import com.alex.trading_engine.engine.MatchingEngine;
 import com.alex.trading_engine.engine.OrderBookSnapshot;
 import com.alex.trading_engine.model.Order;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,7 +21,7 @@ public class OrderController {
     }
 
     @PostMapping("/order")
-    public SubmitOrderResponse submitOrder(@RequestBody Order order) {
+    public SubmitOrderResponse submitOrder(@Valid @RequestBody Order order) {
         var result = matchingEngine.processOrder(order);
         return new SubmitOrderResponse(result.orderId(), result.status());
     }
