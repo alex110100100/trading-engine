@@ -17,6 +17,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -71,7 +72,7 @@ public class OrderControllerTest {
     @Test
     void testGetTrades() throws Exception {
         Instant now = Instant.now();
-        Trade trade = new Trade("buy1", "sell1", "BTC/USD", 31000.0, 1.0, now);
+        Trade trade = new Trade("buy1", "sell1", "BTC/USD", BigDecimal.valueOf(31000.0), BigDecimal.valueOf(1.0), now);
         when(matchingEngine.getTrades()).thenReturn(List.of(trade));
 
         mockMvc.perform(get("/trades"))
@@ -106,8 +107,8 @@ public class OrderControllerTest {
     void testGetOrderBook() throws Exception {
         when(matchingEngine.getOrderBookSnapshot(10))
                 .thenReturn(new OrderBookSnapshot(
-                        List.of(new OrderBookSnapshot.PriceLevel(31000.0, 2.0)),
-                        List.of(new OrderBookSnapshot.PriceLevel(31100.0, 1.0))));
+                        List.of(new OrderBookSnapshot.PriceLevel(BigDecimal.valueOf(31000.0), BigDecimal.valueOf(2.0))),
+                        List.of(new OrderBookSnapshot.PriceLevel(BigDecimal.valueOf(31100.0), BigDecimal.valueOf(1.0)))));
 
         mockMvc.perform(get("/orderbook"))
                 .andExpect(status().isOk())

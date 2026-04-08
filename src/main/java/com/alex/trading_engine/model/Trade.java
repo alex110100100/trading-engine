@@ -2,6 +2,7 @@ package com.alex.trading_engine.model;
 
 import lombok.Getter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -12,11 +13,11 @@ public class Trade {
     private final String buyerOrderId;
     private final String sellerOrderId;
     private final String symbol;
-    private final double price;
-    private final double quantity;
+    private final BigDecimal price;
+    private final BigDecimal quantity;
     private final Instant timestamp;
 
-    public Trade(String buyerOrderId, String sellerOrderId, String symbol, double price, double quantity, Instant timestamp) {
+    public Trade(String buyerOrderId, String sellerOrderId, String symbol, BigDecimal price, BigDecimal quantity, Instant timestamp) {
         this.buyerOrderId = buyerOrderId;
         this.sellerOrderId = sellerOrderId;
         this.symbol = symbol;

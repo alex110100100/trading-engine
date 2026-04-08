@@ -7,6 +7,7 @@ import com.alex.trading_engine.model.Trade;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -22,8 +23,8 @@ import java.util.stream.Collectors;
 @Getter
 public class MatchingEngine {
     // Two order books: Bids (sorted highest first) and Asks (sorted lowest first); each level holds BookEntry for partial-fill tracking
-    private final TreeMap<Double, LinkedHashMap<String, BookEntry>> bids = new TreeMap<>(Comparator.reverseOrder());
-    private final TreeMap<Double, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
+    private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> bids = new TreeMap<>(Comparator.reverseOrder());
+    private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
     private final List<Trade> trades = new ArrayList<>();
 
     /**
@@ -31,7 +32,7 @@ public class MatchingEngine {
      * @return result with order id and status (ACCEPTED / PARTIALLY_FILLED / FILLED).
      */
     public ProcessOrderResult processOrder(Order order) {
-        double remainingQty;
+        BigDecimal remainingQty;
         if (order.getOrderSide() == OrderSide.BUY) {
             remainingQty = matchAgainstAsks(order);
         } else {
@@ -41,9 +42,9 @@ public class MatchingEngine {
         return new ProcessOrderResult(order.getId(), status);
     }
 
-    private static OrderStatus computeStatus(double remainingQty, double originalQty) {
-        if (remainingQty <= 0) return OrderStatus.FILLED;
-        if (remainingQty < originalQty) return OrderStatus.PARTIALLY_FILLED;
+    private static OrderStatus computeStatus(BigDecimal remainingQty, BigDecimal originalQty) {
+        if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) return OrderStatus.FILLED;
+        if (remainingQty.compareTo(originalQty) < 0) return OrderStatus.PARTIALLY_FILLED;
         return OrderStatus.ACCEPTED;
     }
 
@@ -57,9 +58,9 @@ public class MatchingEngine {
         return removeFromBook(orderId, asks);
     }
 
-    private boolean removeFromBook(String orderId, TreeMap<Double, LinkedHashMap<String, BookEntry>> book) {
-        for (Iterator<Map.Entry<Double, LinkedHashMap<String, BookEntry>>> it = book.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<Double, LinkedHashMap<String, BookEntry>> levelEntry = it.next();
+    private boolean removeFromBook(String orderId, TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
+        for (Iterator<Map.Entry<BigDecimal, LinkedHashMap<String, BookEntry>>> it = book.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<BigDecimal, LinkedHashMap<String, BookEntry>> levelEntry = it.next();
             LinkedHashMap<String, BookEntry> level = levelEntry.getValue();
             if (level.containsKey(orderId)) {
                 level.remove(orderId);
@@ -73,13 +74,13 @@ public class MatchingEngine {
     }
 
     /** Incoming BUY matches against resting asks; any unfilled quantity is added to bids. Returns quantity that ended up resting (0 if fully filled). */
-    private double matchAgainstAsks(Order buyOrder) {
-        double remainingQty = buyOrder.getQuantity();
+    private BigDecimal matchAgainstAsks(Order buyOrder) {
+        BigDecimal remainingQty = buyOrder.getQuantity();
         String symbol = buyOrder.getSymbol();
 
-        while (remainingQty > 0 && !asks.isEmpty()) {
-            Double bestAskPrice = asks.firstKey();
-            if (buyOrder.getPrice() < bestAskPrice) {
+        while (remainingQty.compareTo(BigDecimal.ZERO) > 0 && !asks.isEmpty()) {
+            BigDecimal bestAskPrice = asks.firstKey();
+            if (buyOrder.getPrice().compareTo(bestAskPrice) < 0) {
                 break;
             }
             LinkedHashMap<String, BookEntry> level = asks.get(bestAskPrice);
@@ -90,9 +91,15 @@ public class MatchingEngine {
             Map.Entry<String, BookEntry> first = level.entrySet().iterator().next();
             String restingOrderId = first.getKey();
             BookEntry resting = first.getValue();
-            double tradeQty = Math.min(remainingQty, resting.getRemainingQuantity());
+            BigDecimal tradeQty = remainingQty.min(resting.getRemainingQuantity());
 
-            trades.add(new Trade(buyOrder.getId(), restingOrderId, symbol, bestAskPrice, tradeQty, Instant.now()));
+            trades.add(new Trade(
+                    buyOrder.getId(),
+                    restingOrderId,
+                    symbol,
+                    bestAskPrice,
+                    tradeQty,
+                    Instant.now()));
 
             resting.reduceBy(tradeQty);
             if (resting.isFilled()) {
@@ -101,7 +108,7 @@ public class MatchingEngine {
                     asks.remove(bestAskPrice);
                 }
             }
-            remainingQty -= tradeQty;
+            remainingQty = remainingQty.subtract(tradeQty);
         }
 
         addRemainderToBook(buyOrder, remainingQty, bids);
@@ -109,13 +116,13 @@ public class MatchingEngine {
     }
 
     /** Incoming SELL matches against resting bids; any unfilled quantity is added to asks. Returns quantity that ended up resting (0 if fully filled). */
-    private double matchAgainstBids(Order sellOrder) {
-        double remainingQty = sellOrder.getQuantity();
+    private BigDecimal matchAgainstBids(Order sellOrder) {
+        BigDecimal remainingQty = sellOrder.getQuantity();
         String symbol = sellOrder.getSymbol();
 
-        while (remainingQty > 0 && !bids.isEmpty()) {
-            Double bestBidPrice = bids.firstKey();
-            if (sellOrder.getPrice() > bestBidPrice) {
+        while (remainingQty.compareTo(BigDecimal.ZERO) > 0 && !bids.isEmpty()) {
+            BigDecimal bestBidPrice = bids.firstKey();
+            if (sellOrder.getPrice().compareTo(bestBidPrice) > 0) {
                 break;
             }
             LinkedHashMap<String, BookEntry> level = bids.get(bestBidPrice);
@@ -126,9 +133,15 @@ public class MatchingEngine {
             Map.Entry<String, BookEntry> first = level.entrySet().iterator().next();
             String restingOrderId = first.getKey();
             BookEntry resting = first.getValue();
-            double tradeQty = Math.min(remainingQty, resting.getRemainingQuantity());
+            BigDecimal tradeQty = remainingQty.min(resting.getRemainingQuantity());
 
-            trades.add(new Trade(restingOrderId, sellOrder.getId(), symbol, bestBidPrice, tradeQty, Instant.now()));
+            trades.add(new Trade(
+                    restingOrderId,
+                    sellOrder.getId(),
+                    symbol,
+                    bestBidPrice,
+                    tradeQty,
+                    Instant.now()));
 
             resting.reduceBy(tradeQty);
             if (resting.isFilled()) {
@@ -137,16 +150,16 @@ public class MatchingEngine {
                     bids.remove(bestBidPrice);
                 }
             }
-            remainingQty -= tradeQty;
+            remainingQty = remainingQty.subtract(tradeQty);
         }
 
         addRemainderToBook(sellOrder, remainingQty, asks);
         return remainingQty;
     }
 
-    private void addRemainderToBook(Order order, double remainingQty,
-                                    TreeMap<Double, LinkedHashMap<String, BookEntry>> book) {
-        if (remainingQty <= 0) {
+    private void addRemainderToBook(Order order, BigDecimal remainingQty,
+                                    TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
+        if (remainingQty.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
         Order remainder = new Order.Builder()
@@ -159,7 +172,7 @@ public class MatchingEngine {
         addToBook(remainder, book);
     }
 
-    private void addToBook(Order order, TreeMap<Double, LinkedHashMap<String, BookEntry>> book) {
+    private void addToBook(Order order, TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
         book.computeIfAbsent(order.getPrice(), k -> new LinkedHashMap<>())
                 .put(order.getId(), new BookEntry(order, order.getQuantity()));
     }
@@ -175,13 +188,13 @@ public class MatchingEngine {
     }
 
     private List<OrderBookSnapshot.PriceLevel> levelsFromBook(
-            TreeMap<Double, LinkedHashMap<String, BookEntry>> book, int limit) {
+            TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book, int limit) {
         return book.entrySet().stream()
                 .limit(limit)
                 .map(e -> {
-                    double totalQty = e.getValue().values().stream()
-                            .mapToDouble(BookEntry::getRemainingQuantity)
-                            .sum();
+                    BigDecimal totalQty = e.getValue().values().stream()
+                            .map(BookEntry::getRemainingQuantity)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
                     return new OrderBookSnapshot.PriceLevel(e.getKey(), totalQty);
                 })
                 .collect(Collectors.toList());

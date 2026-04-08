@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -20,10 +21,12 @@ public class Order {
     private final String id;
     @NotBlank(message = "symbol is required")
     private final String symbol; // e.g., "BTC/USD"
+    @NotNull(message = "price is required")
     @DecimalMin(value = "0.0", inclusive = false, message = "price must be positive")
-    private final double price;
+    private final BigDecimal price;
+    @NotNull(message = "quantity is required")
     @DecimalMin(value = "0.0", inclusive = false, message = "quantity must be positive")
-    private final double quantity;
+    private final BigDecimal quantity;
     @NotNull(message = "orderSide is required")
     private final OrderSide orderSide;
     private final Instant timestamp;
@@ -52,8 +55,8 @@ public class Order {
     public static class Builder {
         private String id = UUID.randomUUID().toString();
         private String symbol;
-        private double price;
-        private double quantity;
+        private BigDecimal price;
+        private BigDecimal quantity;
         private OrderSide orderSide;
         private Instant timestamp = Instant.now();
 
@@ -68,11 +71,21 @@ public class Order {
         }
 
         public Builder price(double price) {
+            this.price = BigDecimal.valueOf(price);
+            return this;
+        }
+
+        public Builder price(BigDecimal price) {
             this.price = price;
             return this;
         }
 
         public Builder quantity(double quantity) {
+            this.quantity = BigDecimal.valueOf(quantity);
+            return this;
+        }
+
+        public Builder quantity(BigDecimal quantity) {
             this.quantity = quantity;
             return this;
         }
