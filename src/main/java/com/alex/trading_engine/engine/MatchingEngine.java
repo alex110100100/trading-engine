@@ -13,6 +13,13 @@ import java.util.stream.Collectors;
 
 /**
  * Routes orders to a per-symbol {@link OrderBook}. Symbols are isolated: no cross-instrument matching.
+ * <p>
+ * Threading model:
+ * <ul>
+ *   <li>Each symbol has its own lock, so different symbols can process concurrently.</li>
+ *   <li>Operations for the same symbol are serialized to preserve deterministic matching.</li>
+ *   <li>Order status and order-to-symbol index updates happen inside the same symbol lock.</li>
+ * </ul>
  */
 @Service
 @Getter
@@ -20,42 +27,53 @@ public class MatchingEngine {
 
     private final Map<String, OrderBook> books = new ConcurrentHashMap<>();
     private final Map<String, OrderStatus> orderStatuses = new ConcurrentHashMap<>();
-    private final Object engineLock = new Object();
+    private final Map<String, Object> symbolLocks = new ConcurrentHashMap<>();
+    private final Map<String, String> orderToSymbol = new ConcurrentHashMap<>();
 
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
 
+    private Object lockForSymbol(String symbol) {
+        return symbolLocks.computeIfAbsent(symbol, s -> new Object());
+    }
+
     public ProcessOrderResult processOrder(Order order) {
-        synchronized (engineLock) {
+        String symbol = order.getSymbol();
+        synchronized (lockForSymbol(symbol)) {
             ProcessOrderResult result = bookFor(order.getSymbol()).processOrder(order);
             orderStatuses.put(result.orderId(), result.status());
+            orderToSymbol.put(result.orderId(), symbol);
             return result;
         }
     }
 
     public boolean cancelOrder(String orderId) {
-        synchronized (engineLock) {
-            if (orderId == null || orderId.isBlank()) {
+        if (orderId == null || orderId.isBlank()) {
+            return false;
+        }
+        String symbol = orderToSymbol.get(orderId);
+        if (symbol == null) {
+            return false;
+        }
+        synchronized (lockForSymbol(symbol)) {
+            OrderBook book = books.get(symbol);
+            if (book == null) {
                 return false;
             }
-            for (OrderBook book : books.values()) {
-                if (book.cancelOrder(orderId)) {
-                    orderStatuses.put(orderId, OrderStatus.CANCELLED);
-                    return true;
-                }
+            if (book.cancelOrder(orderId)) {
+                orderStatuses.put(orderId, OrderStatus.CANCELLED);
+                return true;
             }
             return false;
         }
     }
 
     public Optional<OrderStatus> getOrderStatus(String orderId) {
-        synchronized (engineLock) {
-            if (orderId == null || orderId.isBlank()) {
-                return Optional.empty();
-            }
-            return Optional.ofNullable(orderStatuses.get(orderId));
+        if (orderId == null || orderId.isBlank()) {
+            return Optional.empty();
         }
+        return Optional.ofNullable(orderStatuses.get(orderId));
     }
 
     /**
@@ -66,19 +84,24 @@ public class MatchingEngine {
      * with buyer order id, then seller order id.
      */
     public List<Trade> getTrades() {
-        synchronized (engineLock) {
-            return books.values().stream()
-                    .flatMap(b -> b.getTrades().stream())
-                    .sorted(Comparator.comparing(Trade::getTimestamp).thenComparing(Trade::getBuyerOrderId).thenComparing(Trade::getSellerOrderId))
-                    .collect(Collectors.toList());
+        List<Trade> allTrades = new ArrayList<>();
+        for (Map.Entry<String, OrderBook> entry : books.entrySet()) {
+            String symbol = entry.getKey();
+            OrderBook book = entry.getValue();
+            synchronized (lockForSymbol(symbol)) {
+                allTrades.addAll(book.getTrades());
+            }
         }
+        return allTrades.stream()
+                .sorted(Comparator.comparing(Trade::getTimestamp).thenComparing(Trade::getBuyerOrderId).thenComparing(Trade::getSellerOrderId))
+                .collect(Collectors.toList());
     }
 
     /**
      * Snapshot for one symbol. Unknown or never-used symbol returns empty bids/asks.
      */
     public OrderBookSnapshot getOrderBookSnapshot(String symbol, int limit) {
-        synchronized (engineLock) {
+        synchronized (lockForSymbol(symbol)) {
             OrderBook book = books.get(symbol);
             if (book == null) {
                 return new OrderBookSnapshot(List.of(), List.of());
@@ -89,7 +112,7 @@ public class MatchingEngine {
 
     /** For tests / inspection: bids for a symbol (empty book if none). */
     public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getBids(String symbol) {
-        synchronized (engineLock) {
+        synchronized (lockForSymbol(symbol)) {
             OrderBook b = books.get(symbol);
             if (b == null) {
                 return new TreeMap<>(Comparator.reverseOrder());
@@ -100,7 +123,7 @@ public class MatchingEngine {
 
     /** For tests / inspection: asks for a symbol (empty book if none). */
     public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getAsks(String symbol) {
-        synchronized (engineLock) {
+        synchronized (lockForSymbol(symbol)) {
             OrderBook b = books.get(symbol);
             if (b == null) {
                 return new TreeMap<>();

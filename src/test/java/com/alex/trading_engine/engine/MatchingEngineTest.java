@@ -472,4 +472,60 @@ class MatchingEngineTest {
             executor.shutdownNow();
         }
     }
+
+    @Test
+    void testConcurrentSubmitsAcrossSymbolsRemainIsolated() throws Exception {
+        int perSymbolOrders = 50;
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        // Start together so both symbols receive concurrent traffic.
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < perSymbolOrders; i++) {
+                final int idx = i;
+                futures.add(executor.submit(() -> {
+                    startGate.await();
+                    matchingEngine.processOrder(new Order.Builder()
+                            .id("btc-" + idx)
+                            .symbol("BTC/USD")
+                            .price(30000)
+                            .quantity(1)
+                            .orderSide(OrderSide.BUY)
+                            .build());
+                    return null;
+                }));
+                futures.add(executor.submit(() -> {
+                    startGate.await();
+                    matchingEngine.processOrder(new Order.Builder()
+                            .id("eth-" + idx)
+                            .symbol("ETH/USD")
+                            .price(2000)
+                            .quantity(1)
+                            .orderSide(OrderSide.BUY)
+                            .build());
+                    return null;
+                }));
+            }
+
+            startGate.countDown();
+            for (Future<?> future : futures) {
+                future.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        LinkedHashMap<String, BookEntry> btcLevel = matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000));
+        LinkedHashMap<String, BookEntry> ethLevel = matchingEngine.getBids("ETH/USD").get(BigDecimal.valueOf(2000));
+        assertNotNull(btcLevel);
+        assertNotNull(ethLevel);
+        assertEquals(perSymbolOrders, btcLevel.size());
+        assertEquals(perSymbolOrders, ethLevel.size());
+        assertTrue(matchingEngine.getTrades().isEmpty());
+
+        // Verify no accidental cross-symbol ids leaked into the wrong book.
+        assertFalse(btcLevel.keySet().stream().anyMatch(id -> id.startsWith("eth-")));
+        assertFalse(ethLevel.keySet().stream().anyMatch(id -> id.startsWith("btc-")));
+    }
 }
