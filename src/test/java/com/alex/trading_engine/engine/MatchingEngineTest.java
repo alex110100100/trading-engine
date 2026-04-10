@@ -4,6 +4,7 @@ import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
 import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
+import com.alex.trading_engine.persistence.TradeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +15,8 @@ import java.util.List;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.Mockito.*;
 
 class MatchingEngineTest {
     private MatchingEngine matchingEngine;
@@ -527,5 +530,33 @@ class MatchingEngineTest {
         // Verify no accidental cross-symbol ids leaked into the wrong book.
         assertFalse(btcLevel.keySet().stream().anyMatch(id -> id.startsWith("eth-")));
         assertFalse(ethLevel.keySet().stream().anyMatch(id -> id.startsWith("btc-")));
+    }
+
+    @Test
+    @SuppressWarnings("null")
+    void testMatchedTradesArePersistedWhenRepositoryAvailable() {
+        TradeRepository tradeRepository = mock(TradeRepository.class);
+        matchingEngine.setTradeRepository(tradeRepository);
+
+        Order ask = new Order.Builder()
+                .id("ask-persist")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.SELL)
+                .build();
+        matchingEngine.processOrder(ask);
+        verifyNoInteractions(tradeRepository);
+
+        Order buy = new Order.Builder()
+                .id("buy-persist")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build();
+        matchingEngine.processOrder(buy);
+
+        verify(tradeRepository, times(1)).saveAll(notNull());
     }
 }

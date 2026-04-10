@@ -3,7 +3,10 @@ package com.alex.trading_engine.engine;
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
+import com.alex.trading_engine.persistence.TradeEntity;
+import com.alex.trading_engine.persistence.TradeRepository;
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -29,6 +32,7 @@ public class MatchingEngine {
     private final Map<String, OrderStatus> orderStatuses = new ConcurrentHashMap<>();
     private final Map<String, Object> symbolLocks = new ConcurrentHashMap<>();
     private final Map<String, String> orderToSymbol = new ConcurrentHashMap<>();
+    private TradeRepository tradeRepository;
 
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
@@ -38,14 +42,41 @@ public class MatchingEngine {
         return symbolLocks.computeIfAbsent(symbol, s -> new Object());
     }
 
+    @Autowired(required = false)
+    void setTradeRepository(TradeRepository tradeRepository) {
+        this.tradeRepository = tradeRepository;
+    }
+
     public ProcessOrderResult processOrder(Order order) {
         String symbol = order.getSymbol();
         synchronized (lockForSymbol(symbol)) {
-            ProcessOrderResult result = bookFor(order.getSymbol()).processOrder(order);
+            OrderBook book = bookFor(symbol);
+            int tradeCountBefore = book.getTrades().size();
+            ProcessOrderResult result = book.processOrder(order);
+            persistNewTrades(book, tradeCountBefore);
             orderStatuses.put(result.orderId(), result.status());
             orderToSymbol.put(result.orderId(), symbol);
             return result;
         }
+    }
+
+    private void persistNewTrades(OrderBook book, int tradeCountBefore) {
+        if (tradeRepository == null) {
+            return;
+        }
+        List<Trade> trades = book.getTrades();
+        if (trades.size() <= tradeCountBefore) {
+            return;
+        }
+        List<TradeEntity> newTrades = trades.subList(tradeCountBefore, trades.size()).stream()
+                .map(TradeEntity::fromDomain)
+                .toList();
+        saveTrades(newTrades);
+    }
+
+    @SuppressWarnings("null")
+    private void saveTrades(List<TradeEntity> newTrades) {
+        tradeRepository.saveAll(newTrades);
     }
 
     public boolean cancelOrder(String orderId) {
