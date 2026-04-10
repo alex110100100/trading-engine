@@ -57,8 +57,10 @@ Error body shape (`application/json`):
 
 ## Persistence (current scope)
 
-- **Trades:** On each match, new trades are written to the **`trades`** table. **`GET /trades`** loads from that table in the running application.
-- **Order book & order status:** Still **in-memory** after restart unless you reload them (next major step: persist open orders and replay into books).
+- **Trades:** On each match, new trades are written to the **`trades`** table. **`GET /trades`** reads from that table when JPA is enabled.
+- **Open orders:** Resting liquidity is mirrored in **`open_orders`** after each change for that symbol (submit, match, cancel). On startup, **`OpenOrderReplayRunner`** reloads those rows into the in-memory book (same sort order as stored) so the book can recover after a restart.
+- **How startup replay runs:** `OpenOrderReplayRunner` is a Spring bean that implements **`ApplicationRunner`**. After the application context is up (JPA repositories and `MatchingEngine` are ready), Spring calls **`run(ApplicationArguments)` once**. That method only delegates to **`MatchingEngine.replayOpenOrdersFromDatabase()`** — no HTTP involved. **`@Order(20)`** controls ordering relative to *other* runners (lower numbers run first); we use `20` so you can add an earlier runner later (e.g. migrations) without changing this class.
+- **`GET /order/{id}`** still reflects **in-memory** status (including `CANCELLED`); it is not yet loaded from the database after restart.
 
 ## How matching works
 
@@ -85,6 +87,6 @@ Error body shape (`application/json`):
 
 ## Next steps (ideas)
 
-- Persist **open / resting orders** and **replay** the order book on startup.
-- Persist **order status** (or events) so `GET /order/{id}` survives restarts.
-- **Flyway** for schema migrations; **metrics / health / CI** for operability.
+- Persist **order status** (or events) so **`GET /order/{id}`** survives restarts and matches replayed state.
+- **Flyway** for schema migrations instead of `ddl-auto=update`.
+- **Metrics / health / CI** for operability.

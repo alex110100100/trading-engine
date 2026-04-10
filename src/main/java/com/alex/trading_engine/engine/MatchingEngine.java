@@ -3,6 +3,8 @@ package com.alex.trading_engine.engine;
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
+import com.alex.trading_engine.persistence.OpenOrderEntity;
+import com.alex.trading_engine.persistence.OpenOrderPersistenceService;
 import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
 import lombok.Getter;
@@ -22,6 +24,7 @@ import java.util.stream.Collectors;
  *   <li>Each symbol has its own lock, so different symbols can process concurrently.</li>
  *   <li>Operations for the same symbol are serialized to preserve deterministic matching.</li>
  *   <li>Order status and order-to-symbol index updates happen inside the same symbol lock.</li>
+ *   <li>Open resting orders are synced to {@code open_orders} after each change (when persistence is enabled).</li>
  * </ul>
  */
 @Service
@@ -33,10 +36,16 @@ public class MatchingEngine {
     private final Map<String, Object> symbolLocks = new ConcurrentHashMap<>();
     private final Map<String, String> orderToSymbol = new ConcurrentHashMap<>();
     private TradeRepository tradeRepository;
+    private OpenOrderPersistenceService openOrderPersistenceService;
 
     @Autowired(required = false)
     void setTradeRepository(TradeRepository tradeRepository) {
         this.tradeRepository = tradeRepository;
+    }
+
+    @Autowired(required = false)
+    void setOpenOrderPersistenceService(OpenOrderPersistenceService openOrderPersistenceService) {
+        this.openOrderPersistenceService = openOrderPersistenceService;
     }
     
     private OrderBook bookFor(String symbol) {
@@ -56,7 +65,50 @@ public class MatchingEngine {
             persistNewTrades(book, tradeCountBefore);
             orderStatuses.put(result.orderId(), result.status());
             orderToSymbol.put(result.orderId(), symbol);
+            syncOpenOrdersForSymbol(symbol);
             return result;
+        }
+    }
+
+    private void syncOpenOrdersForSymbol(String symbol) {
+        if (openOrderPersistenceService == null) {
+            return;
+        }
+        OrderBook book = books.get(symbol);
+        Map<String, OrderBook.RestingOrderState> state =
+                book == null ? Map.of() : book.collectRestingOrders();
+        openOrderPersistenceService.syncSymbol(symbol, state);
+    }
+
+    /**
+     * Loads {@code open_orders} from the database into memory (application startup / recovery).
+     */
+    public void replayOpenOrdersFromDatabase() {
+        if (openOrderPersistenceService == null) {
+            return;
+        }
+        for (OpenOrderEntity row : openOrderPersistenceService.loadAllOpenOrdersForReplay()) {
+            Order order = new Order.Builder()
+                    .id(row.getOrderId())
+                    .symbol(row.getSymbol())
+                    .price(row.getPrice())
+                    .quantity(row.getRemainingQuantity())
+                    .orderSide(row.getOrderSide())
+                    .timestamp(row.getCreatedAt())
+                    .build();
+            restoreRestingOrderAfterReplay(order, row.getOriginalQuantity());
+        }
+    }
+
+    private void restoreRestingOrderAfterReplay(Order order, BigDecimal originalQuantity) {
+        String symbol = order.getSymbol();
+        synchronized (lockForSymbol(symbol)) {
+            bookFor(symbol).placeRestingWithoutMatch(order);
+            OrderStatus status = order.getQuantity().compareTo(originalQuantity) < 0
+                    ? OrderStatus.PARTIALLY_FILLED
+                    : OrderStatus.ACCEPTED;
+            orderStatuses.put(order.getId(), status);
+            orderToSymbol.put(order.getId(), symbol);
         }
     }
 
@@ -94,6 +146,7 @@ public class MatchingEngine {
             }
             if (book.cancelOrder(orderId)) {
                 orderStatuses.put(orderId, OrderStatus.CANCELLED);
+                syncOpenOrdersForSymbol(symbol);
                 return true;
             }
             return false;

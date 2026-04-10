@@ -4,6 +4,8 @@ import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
 import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
+import com.alex.trading_engine.persistence.OpenOrderEntity;
+import com.alex.trading_engine.persistence.OpenOrderPersistenceService;
 import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,8 @@ import java.util.List;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.*;
 
@@ -577,5 +581,36 @@ class MatchingEngineTest {
         assertEquals("b1", trades.get(0).getBuyerOrderId());
         assertEquals("s1", trades.get(0).getSellerOrderId());
         verify(tradeRepository, times(1)).findAllByOrderByTimestampAscBuyerOrderIdAscSellerOrderIdAsc();
+    }
+
+    @Test
+    void restingOrderTriggersOpenOrderSync() {
+        OpenOrderPersistenceService openSync = mock(OpenOrderPersistenceService.class);
+        matchingEngine.setOpenOrderPersistenceService(openSync);
+
+        matchingEngine.processOrder(new Order.Builder()
+                .id("rest-sync")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        verify(openSync, times(1)).syncSymbol(eq("BTC/USD"), any());
+    }
+
+    @Test
+    void replayRestoresRestingOrdersFromDatabaseRows() {
+        OpenOrderPersistenceService openSync = mock(OpenOrderPersistenceService.class);
+        Instant t = Instant.parse("2026-01-01T12:00:00Z");
+        OpenOrderEntity row = new OpenOrderEntity(
+                "r1", "BTC/USD", OrderSide.BUY, BigDecimal.valueOf(30000), BigDecimal.ONE, BigDecimal.ONE, t);
+        when(openSync.loadAllOpenOrdersForReplay()).thenReturn(List.of(row));
+        matchingEngine.setOpenOrderPersistenceService(openSync);
+
+        matchingEngine.replayOpenOrdersFromDatabase();
+
+        assertTrue(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000)).containsKey("r1"));
+        assertEquals(OrderStatus.ACCEPTED, matchingEngine.getOrderStatus("r1").orElseThrow());
     }
 }

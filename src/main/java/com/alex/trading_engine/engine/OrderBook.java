@@ -21,6 +21,14 @@ import java.util.stream.Collectors;
  */
 @Getter
 public class OrderBook {
+
+    /** Snapshot of one resting order for persistence / replay. */
+    public record RestingOrderState(
+            OrderSide side,
+            BigDecimal price,
+            BigDecimal remainingQuantity,
+            BigDecimal originalQuantity,
+            Instant createdAt) {}
     private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> bids =
             new TreeMap<>(Comparator.reverseOrder());
     private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
@@ -165,6 +173,49 @@ public class OrderBook {
     private void addToBook(Order order, TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book) {
         book.computeIfAbsent(order.getPrice(), k -> new LinkedHashMap<>())
                 .put(order.getId(), new BookEntry(order, order.getQuantity()));
+    }
+
+    /**
+     * Places a resting order without matching (used when replaying {@code open_orders} after restart).
+     */
+    public void placeRestingWithoutMatch(Order order) {
+        TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> sideBook =
+                order.getOrderSide() == OrderSide.BUY ? bids : asks;
+        for (LinkedHashMap<String, BookEntry> level : sideBook.values()) {
+            if (level.containsKey(order.getId())) {
+                throw new IllegalStateException("Order id already in book: " + order.getId());
+            }
+        }
+        addToBook(order, sideBook);
+    }
+
+    /** All resting orders in this book (bids and asks), keyed by order id. */
+    public Map<String, RestingOrderState> collectRestingOrders() {
+        Map<String, RestingOrderState> out = new LinkedHashMap<>();
+        collectSide(bids, OrderSide.BUY, out);
+        collectSide(asks, OrderSide.SELL, out);
+        return out;
+    }
+
+    private static void collectSide(
+            TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> book,
+            OrderSide side,
+            Map<String, RestingOrderState> out) {
+        for (Map.Entry<BigDecimal, LinkedHashMap<String, BookEntry>> levelEntry : book.entrySet()) {
+            BigDecimal price = levelEntry.getKey();
+            for (Map.Entry<String, BookEntry> e : levelEntry.getValue().entrySet()) {
+                BookEntry be = e.getValue();
+                Order o = be.getOrder();
+                out.put(
+                        o.getId(),
+                        new RestingOrderState(
+                                side,
+                                price,
+                                be.getRemainingQuantity(),
+                                o.getQuantity(),
+                                o.getTimestamp()));
+            }
+        }
     }
 
     public OrderBookSnapshot getSnapshot(int limit) {
