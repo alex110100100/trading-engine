@@ -34,15 +34,17 @@ public class OrderBook {
     private final TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> asks = new TreeMap<>();
     private final List<Trade> trades = new ArrayList<>();
 
-    public ProcessOrderResult processOrder(Order order) {
+    public ProcessOrderOutcome processOrder(Order order) {
+        Map<String, PassiveOrderStatusUpdate> passiveByOrderId = new LinkedHashMap<>();
         BigDecimal remainingQty;
         if (order.getOrderSide() == OrderSide.BUY) {
-            remainingQty = matchAgainstAsks(order);
+            remainingQty = matchAgainstAsks(order, passiveByOrderId);
         } else {
-            remainingQty = matchAgainstBids(order);
+            remainingQty = matchAgainstBids(order, passiveByOrderId);
         }
         OrderStatus status = computeStatus(remainingQty, order.getQuantity());
-        return new ProcessOrderResult(order.getId(), status);
+        ProcessOrderResult incoming = new ProcessOrderResult(order.getId(), status);
+        return new ProcessOrderOutcome(incoming, List.copyOf(passiveByOrderId.values()));
     }
 
     private static OrderStatus computeStatus(BigDecimal remainingQty, BigDecimal originalQty) {
@@ -73,7 +75,7 @@ public class OrderBook {
         return false;
     }
 
-    private BigDecimal matchAgainstAsks(Order buyOrder) {
+    private BigDecimal matchAgainstAsks(Order buyOrder, Map<String, PassiveOrderStatusUpdate> passiveByOrderId) {
         BigDecimal remainingQty = buyOrder.getQuantity();
         String symbol = buyOrder.getSymbol();
 
@@ -101,6 +103,12 @@ public class OrderBook {
                     Instant.now()));
 
             resting.reduceBy(tradeQty);
+            passiveByOrderId.put(
+                    restingOrderId,
+                    new PassiveOrderStatusUpdate(
+                            restingOrderId,
+                            symbol,
+                            computeStatus(resting.getRemainingQuantity(), resting.getOrder().getQuantity())));
             if (resting.isFilled()) {
                 level.remove(restingOrderId);
                 if (level.isEmpty()) {
@@ -114,7 +122,7 @@ public class OrderBook {
         return remainingQty;
     }
 
-    private BigDecimal matchAgainstBids(Order sellOrder) {
+    private BigDecimal matchAgainstBids(Order sellOrder, Map<String, PassiveOrderStatusUpdate> passiveByOrderId) {
         BigDecimal remainingQty = sellOrder.getQuantity();
         String symbol = sellOrder.getSymbol();
 
@@ -142,6 +150,12 @@ public class OrderBook {
                     Instant.now()));
 
             resting.reduceBy(tradeQty);
+            passiveByOrderId.put(
+                    restingOrderId,
+                    new PassiveOrderStatusUpdate(
+                            restingOrderId,
+                            symbol,
+                            computeStatus(resting.getRemainingQuantity(), resting.getOrder().getQuantity())));
             if (resting.isFilled()) {
                 level.remove(restingOrderId);
                 if (level.isEmpty()) {

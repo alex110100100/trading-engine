@@ -69,11 +69,17 @@ public class MatchingEngine {
         synchronized (lockForSymbol(symbol)) {
             OrderBook book = bookFor(symbol);
             int tradeCountBefore = book.getTrades().size();
-            ProcessOrderResult result = book.processOrder(order);
+            ProcessOrderOutcome outcome = book.processOrder(order);
             persistNewTrades(book, tradeCountBefore);
+            ProcessOrderResult result = outcome.incoming();
             orderStatuses.put(result.orderId(), result.status());
             orderToSymbol.put(result.orderId(), symbol);
             persistOrderState(result.orderId(), symbol, result.status());
+            for (PassiveOrderStatusUpdate passive : outcome.passiveUpdates()) {
+                orderStatuses.put(passive.orderId(), passive.status());
+                orderToSymbol.put(passive.orderId(), passive.symbol());
+                persistOrderState(passive.orderId(), passive.symbol(), passive.status());
+            }
             syncOpenOrdersForSymbol(symbol);
             return result;
         }

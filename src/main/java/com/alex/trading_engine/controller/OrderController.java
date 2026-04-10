@@ -110,7 +110,7 @@ public class OrderController {
     @GetMapping("/order/{id}")
     @Operation(
             summary = "Get order status",
-            description = "Returns the latest known status for a submitted order. Uses in-memory state when present; with JPA enabled, falls back to persisted status in the database.")
+            description = "Returns the latest known status. Uses in-memory state when present; with JPA enabled, falls back to persisted status in the database (e.g. FILLED or CANCELLED after a restart).")
     public ResponseEntity<OrderStatusResponse> getOrderStatus(@PathVariable String id) {
         return matchingEngine.getOrderStatus(id)
                 .map(status -> ResponseEntity.ok(new OrderStatusResponse(id, status)))

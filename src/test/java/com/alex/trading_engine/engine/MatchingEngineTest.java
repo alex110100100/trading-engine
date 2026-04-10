@@ -659,4 +659,29 @@ class MatchingEngineTest {
         assertEquals(OrderStatus.FILLED, matchingEngine.getOrderStatus("gone").orElseThrow());
         verify(stateSvc, times(1)).findStatus("gone");
     }
+
+    @Test
+    void fullyFilledRestingOrderGetsStatusAndPersistence() {
+        OrderStatePersistenceService stateSvc = mock(OrderStatePersistenceService.class);
+        matchingEngine.setOrderStatePersistenceService(stateSvc);
+
+        matchingEngine.processOrder(new Order.Builder()
+                .id("ask1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.SELL)
+                .build());
+        matchingEngine.processOrder(new Order.Builder()
+                .id("buy1")
+                .symbol("BTC/USD")
+                .price(31000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        assertEquals(OrderStatus.FILLED, matchingEngine.getOrderStatus("ask1").orElseThrow());
+        verify(stateSvc).save(eq("ask1"), eq("BTC/USD"), eq(OrderStatus.FILLED));
+        verify(stateSvc).save(eq("buy1"), eq("BTC/USD"), eq(OrderStatus.FILLED));
+    }
 }
