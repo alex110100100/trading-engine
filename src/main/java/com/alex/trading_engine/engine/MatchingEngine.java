@@ -34,17 +34,17 @@ public class MatchingEngine {
     private final Map<String, String> orderToSymbol = new ConcurrentHashMap<>();
     private TradeRepository tradeRepository;
 
+    @Autowired(required = false)
+    void setTradeRepository(TradeRepository tradeRepository) {
+        this.tradeRepository = tradeRepository;
+    }
+    
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
 
     private Object lockForSymbol(String symbol) {
         return symbolLocks.computeIfAbsent(symbol, s -> new Object());
-    }
-
-    @Autowired(required = false)
-    void setTradeRepository(TradeRepository tradeRepository) {
-        this.tradeRepository = tradeRepository;
     }
 
     public ProcessOrderResult processOrder(Order order) {
@@ -108,13 +108,17 @@ public class MatchingEngine {
     }
 
     /**
-     * All trades across symbols, merged and sorted for a deterministic list.
+     * All trades, sorted for a deterministic list (timestamp, then buyer id, then seller id).
      * <p>
-     * Primary sort: {@link Trade#getTimestamp()}. If two trades share the same instant (possible when
-     * several matches occur in the same JVM clock tick), timestamps compare equal, so we break ties
-     * with buyer order id, then seller order id.
+     * When a {@link TradeRepository} is present (running app with JPA), reads from the database so
+     * history survives restarts. Unit tests without a repository still read from in-memory books.
      */
     public List<Trade> getTrades() {
+        if (tradeRepository != null) {
+            return tradeRepository.findAllByOrderByTimestampAscBuyerOrderIdAscSellerOrderIdAsc().stream()
+                    .map(TradeEntity::toDomain)
+                    .toList();
+        }
         List<Trade> allTrades = new ArrayList<>();
         for (Map.Entry<String, OrderBook> entry : books.entrySet()) {
             String symbol = entry.getKey();

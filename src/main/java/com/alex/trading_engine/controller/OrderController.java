@@ -72,7 +72,9 @@ public class OrderController {
     }
 
     @GetMapping("/trades")
-    @Operation(summary = "List all trades", description = "Trades from all symbols, merged and sorted by time (with deterministic ties).")
+    @Operation(
+            summary = "List all trades",
+            description = "Sorted by execution time (deterministic ties). With JPA enabled, reads persisted trade history from the database.")
     public List<TradeResponse> getTrades() {
         return matchingEngine.getTrades().stream()
                 .map(TradeResponse::from)

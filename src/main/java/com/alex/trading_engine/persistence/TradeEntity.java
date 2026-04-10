@@ -2,12 +2,14 @@ package com.alex.trading_engine.persistence;
 
 import com.alex.trading_engine.model.Trade;
 import jakarta.persistence.*;
+import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
 @Table(name = "trades")
+@Getter
 public class TradeEntity {
 
     @Id
@@ -52,5 +54,9 @@ public class TradeEntity {
                 trade.getPrice(),
                 trade.getQuantity(),
                 trade.getTimestamp());
+    }
+
+    public Trade toDomain() {
+        return new Trade(buyerOrderId, sellerOrderId, symbol, price, quantity, timestamp);
     }
 }

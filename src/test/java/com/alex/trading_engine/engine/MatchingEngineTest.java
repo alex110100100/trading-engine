@@ -4,11 +4,13 @@ import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
 import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
+import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -558,5 +560,22 @@ class MatchingEngineTest {
         matchingEngine.processOrder(buy);
 
         verify(tradeRepository, times(1)).saveAll(notNull());
+    }
+
+    @Test
+    void testGetTradesUsesRepositoryWhenPresent() {
+        TradeRepository tradeRepository = mock(TradeRepository.class);
+        Instant ts = Instant.parse("2026-01-01T12:00:00Z");
+        TradeEntity entity = new TradeEntity("b1", "s1", "BTC/USD", BigDecimal.valueOf(100), BigDecimal.ONE, ts);
+        when(tradeRepository.findAllByOrderByTimestampAscBuyerOrderIdAscSellerOrderIdAsc())
+                .thenReturn(List.of(entity));
+        matchingEngine.setTradeRepository(tradeRepository);
+
+        List<Trade> trades = matchingEngine.getTrades();
+
+        assertEquals(1, trades.size());
+        assertEquals("b1", trades.get(0).getBuyerOrderId());
+        assertEquals("s1", trades.get(0).getSellerOrderId());
+        verify(tradeRepository, times(1)).findAllByOrderByTimestampAscBuyerOrderIdAscSellerOrderIdAsc();
     }
 }
