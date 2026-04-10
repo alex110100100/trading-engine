@@ -9,5 +9,6 @@ package com.alex.trading_engine.model;
 public enum OrderStatus {
     ACCEPTED,
     PARTIALLY_FILLED,
-    FILLED
+    FILLED,
+    CANCELLED
 }

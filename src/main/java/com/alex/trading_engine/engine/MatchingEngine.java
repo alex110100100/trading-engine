@@ -1,6 +1,7 @@
 package com.alex.trading_engine.engine;
 
 import com.alex.trading_engine.model.Order;
+import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
@@ -18,13 +19,16 @@ import java.util.stream.Collectors;
 public class MatchingEngine {
 
     private final Map<String, OrderBook> books = new ConcurrentHashMap<>();
+    private final Map<String, OrderStatus> orderStatuses = new ConcurrentHashMap<>();
 
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
 
     public ProcessOrderResult processOrder(Order order) {
-        return bookFor(order.getSymbol()).processOrder(order);
+        ProcessOrderResult result = bookFor(order.getSymbol()).processOrder(order);
+        orderStatuses.put(result.orderId(), result.status());
+        return result;
     }
 
     public boolean cancelOrder(String orderId) {
@@ -33,10 +37,18 @@ public class MatchingEngine {
         }
         for (OrderBook book : books.values()) {
             if (book.cancelOrder(orderId)) {
+                orderStatuses.put(orderId, OrderStatus.CANCELLED);
                 return true;
             }
         }
         return false;
+    }
+
+    public Optional<OrderStatus> getOrderStatus(String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(orderStatuses.get(orderId));
     }
 
     /**

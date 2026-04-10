@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -104,6 +105,24 @@ public class OrderControllerTest {
         mockMvc.perform(delete("/order/unknown"))
                 .andExpect(status().isNotFound());
         verify(matchingEngine).cancelOrder("unknown");
+    }
+
+    @Test
+    void testGetOrderStatusReturnsOkWhenFound() throws Exception {
+        when(matchingEngine.getOrderStatus("order1")).thenReturn(Optional.of(OrderStatus.PARTIALLY_FILLED));
+
+        mockMvc.perform(get("/order/order1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value("order1"))
+                .andExpect(jsonPath("$.status").value("PARTIALLY_FILLED"));
+    }
+
+    @Test
+    void testGetOrderStatusReturnsNotFoundWhenUnknown() throws Exception {
+        when(matchingEngine.getOrderStatus("unknown")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/order/unknown"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

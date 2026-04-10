@@ -2,6 +2,7 @@ package com.alex.trading_engine.engine;
 
 import com.alex.trading_engine.model.Order;
 import com.alex.trading_engine.model.OrderSide;
+import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -348,5 +349,32 @@ class MatchingEngineTest {
         OrderBookSnapshot snap = matchingEngine.getOrderBookSnapshot("UNKNOWN/PAIR", 10);
         assertTrue(snap.bids().isEmpty());
         assertTrue(snap.asks().isEmpty());
+    }
+
+    @Test
+    void testGetOrderStatusAcceptedForRestingOrder() {
+        matchingEngine.processOrder(new Order.Builder()
+                .id("resting")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        assertEquals(OrderStatus.ACCEPTED, matchingEngine.getOrderStatus("resting").orElseThrow());
+    }
+
+    @Test
+    void testGetOrderStatusCancelledAfterCancel() {
+        matchingEngine.processOrder(new Order.Builder()
+                .id("cancel-me")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        assertTrue(matchingEngine.cancelOrder("cancel-me"));
+        assertEquals(OrderStatus.CANCELLED, matchingEngine.getOrderStatus("cancel-me").orElseThrow());
     }
 }

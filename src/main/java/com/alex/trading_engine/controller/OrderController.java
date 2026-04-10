@@ -1,6 +1,7 @@
 package com.alex.trading_engine.controller;
 
 import com.alex.trading_engine.controller.dto.OrderBookResponse;
+import com.alex.trading_engine.controller.dto.OrderStatusResponse;
 import com.alex.trading_engine.controller.dto.SubmitOrderResponse;
 import com.alex.trading_engine.controller.dto.TradeResponse;
 import com.alex.trading_engine.engine.MatchingEngine;
@@ -102,5 +103,13 @@ public class OrderController {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.notFound().build();
+    }
+
+    @GetMapping("/order/{id}")
+    @Operation(summary = "Get order status", description = "Returns the latest known status for an order id.")
+    public ResponseEntity<OrderStatusResponse> getOrderStatus(@PathVariable String id) {
+        return matchingEngine.getOrderStatus(id)
+                .map(status -> ResponseEntity.ok(new OrderStatusResponse(id, status)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }
