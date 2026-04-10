@@ -8,6 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -376,5 +380,96 @@ class MatchingEngineTest {
 
         assertTrue(matchingEngine.cancelOrder("cancel-me"));
         assertEquals(OrderStatus.CANCELLED, matchingEngine.getOrderStatus("cancel-me").orElseThrow());
+    }
+
+    @Test
+    void testConcurrentSubmitsRemainConsistent() throws Exception {
+        int threadCount = 8;
+        int orderCount = 100;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        // Start all workers together to maximize overlap and expose race conditions.
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < orderCount; i++) {
+                final int idx = i;
+                futures.add(executor.submit(() -> {
+                    startGate.await();
+                    matchingEngine.processOrder(new Order.Builder()
+                            .id("buy-" + idx)
+                            .symbol("BTC/USD")
+                            .price(30000)
+                            .quantity(1)
+                            .orderSide(OrderSide.BUY)
+                            .build());
+                    return null;
+                }));
+            }
+
+            startGate.countDown();
+            for (Future<?> future : futures) {
+                future.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        LinkedHashMap<String, BookEntry> level = matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000));
+        assertNotNull(level);
+        assertEquals(orderCount, level.size());
+        for (int i = 0; i < orderCount; i++) {
+            assertEquals(OrderStatus.ACCEPTED, matchingEngine.getOrderStatus("buy-" + i).orElseThrow());
+        }
+    }
+
+    @Test
+    void testConcurrentSubmitAndCancelEndsInValidState() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        // Both tasks wait on this gate so submit/cancel race at nearly the same instant.
+        CountDownLatch startGate = new CountDownLatch(1);
+
+        Future<?> submitFuture = executor.submit(() -> {
+            startGate.await();
+            matchingEngine.processOrder(new Order.Builder()
+                    .id("race-order")
+                    .symbol("BTC/USD")
+                    .price(30000)
+                    .quantity(1)
+                    .orderSide(OrderSide.BUY)
+                    .build());
+            return null;
+        });
+
+        Future<Boolean> cancelFuture = executor.submit(() -> {
+            startGate.await();
+            return matchingEngine.cancelOrder("race-order");
+        });
+
+        try {
+            startGate.countDown();
+            submitFuture.get(5, TimeUnit.SECONDS);
+            boolean cancelResult = cancelFuture.get(5, TimeUnit.SECONDS);
+
+            OrderStatus status = matchingEngine.getOrderStatus("race-order").orElseThrow();
+            // Both outcomes are valid in a race:
+            // 1) cancel wins -> status CANCELLED and not in book
+            // 2) submit wins -> status ACCEPTED and present in book
+            // This test checks that whichever path occurs, final state is consistent.
+            if (cancelResult) {
+                assertEquals(OrderStatus.CANCELLED, status);
+                LinkedHashMap<String, BookEntry> level = matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000));
+                if (level != null) {
+                    assertFalse(level.containsKey("race-order"));
+                }
+            } else {
+                assertEquals(OrderStatus.ACCEPTED, status);
+                LinkedHashMap<String, BookEntry> level = matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000));
+                assertNotNull(level);
+                assertTrue(level.containsKey("race-order"));
+            }
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }

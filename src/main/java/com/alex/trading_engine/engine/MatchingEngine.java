@@ -20,35 +20,42 @@ public class MatchingEngine {
 
     private final Map<String, OrderBook> books = new ConcurrentHashMap<>();
     private final Map<String, OrderStatus> orderStatuses = new ConcurrentHashMap<>();
+    private final Object engineLock = new Object();
 
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
 
     public ProcessOrderResult processOrder(Order order) {
-        ProcessOrderResult result = bookFor(order.getSymbol()).processOrder(order);
-        orderStatuses.put(result.orderId(), result.status());
-        return result;
+        synchronized (engineLock) {
+            ProcessOrderResult result = bookFor(order.getSymbol()).processOrder(order);
+            orderStatuses.put(result.orderId(), result.status());
+            return result;
+        }
     }
 
     public boolean cancelOrder(String orderId) {
-        if (orderId == null || orderId.isBlank()) {
+        synchronized (engineLock) {
+            if (orderId == null || orderId.isBlank()) {
+                return false;
+            }
+            for (OrderBook book : books.values()) {
+                if (book.cancelOrder(orderId)) {
+                    orderStatuses.put(orderId, OrderStatus.CANCELLED);
+                    return true;
+                }
+            }
             return false;
         }
-        for (OrderBook book : books.values()) {
-            if (book.cancelOrder(orderId)) {
-                orderStatuses.put(orderId, OrderStatus.CANCELLED);
-                return true;
-            }
-        }
-        return false;
     }
 
     public Optional<OrderStatus> getOrderStatus(String orderId) {
-        if (orderId == null || orderId.isBlank()) {
-            return Optional.empty();
+        synchronized (engineLock) {
+            if (orderId == null || orderId.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(orderStatuses.get(orderId));
         }
-        return Optional.ofNullable(orderStatuses.get(orderId));
     }
 
     /**
@@ -59,38 +66,46 @@ public class MatchingEngine {
      * with buyer order id, then seller order id.
      */
     public List<Trade> getTrades() {
-        return books.values().stream()
-                .flatMap(b -> b.getTrades().stream())
-                .sorted(Comparator.comparing(Trade::getTimestamp).thenComparing(Trade::getBuyerOrderId).thenComparing(Trade::getSellerOrderId))
-                .collect(Collectors.toList());
+        synchronized (engineLock) {
+            return books.values().stream()
+                    .flatMap(b -> b.getTrades().stream())
+                    .sorted(Comparator.comparing(Trade::getTimestamp).thenComparing(Trade::getBuyerOrderId).thenComparing(Trade::getSellerOrderId))
+                    .collect(Collectors.toList());
+        }
     }
 
     /**
      * Snapshot for one symbol. Unknown or never-used symbol returns empty bids/asks.
      */
     public OrderBookSnapshot getOrderBookSnapshot(String symbol, int limit) {
-        OrderBook book = books.get(symbol);
-        if (book == null) {
-            return new OrderBookSnapshot(List.of(), List.of());
+        synchronized (engineLock) {
+            OrderBook book = books.get(symbol);
+            if (book == null) {
+                return new OrderBookSnapshot(List.of(), List.of());
+            }
+            return book.getSnapshot(limit);
         }
-        return book.getSnapshot(limit);
     }
 
     /** For tests / inspection: bids for a symbol (empty book if none). */
     public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getBids(String symbol) {
-        OrderBook b = books.get(symbol);
-        if (b == null) {
-            return new TreeMap<>(Comparator.reverseOrder());
+        synchronized (engineLock) {
+            OrderBook b = books.get(symbol);
+            if (b == null) {
+                return new TreeMap<>(Comparator.reverseOrder());
+            }
+            return b.getBids();
         }
-        return b.getBids();
     }
 
     /** For tests / inspection: asks for a symbol (empty book if none). */
     public TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>> getAsks(String symbol) {
-        OrderBook b = books.get(symbol);
-        if (b == null) {
-            return new TreeMap<>();
+        synchronized (engineLock) {
+            OrderBook b = books.get(symbol);
+            if (b == null) {
+                return new TreeMap<>();
+            }
+            return b.getAsks();
         }
-        return b.getAsks();
     }
 }
