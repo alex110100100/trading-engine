@@ -6,6 +6,7 @@ import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import com.alex.trading_engine.persistence.OpenOrderEntity;
 import com.alex.trading_engine.persistence.OpenOrderPersistenceService;
+import com.alex.trading_engine.persistence.OrderStatePersistenceService;
 import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -612,5 +614,49 @@ class MatchingEngineTest {
 
         assertTrue(matchingEngine.getBids("BTC/USD").get(BigDecimal.valueOf(30000)).containsKey("r1"));
         assertEquals(OrderStatus.ACCEPTED, matchingEngine.getOrderStatus("r1").orElseThrow());
+    }
+
+    @Test
+    void processOrderPersistsOrderStateWhenServicePresent() {
+        OrderStatePersistenceService stateSvc = mock(OrderStatePersistenceService.class);
+        matchingEngine.setOrderStatePersistenceService(stateSvc);
+
+        matchingEngine.processOrder(new Order.Builder()
+                .id("state-1")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+
+        verify(stateSvc, times(1)).save(eq("state-1"), eq("BTC/USD"), eq(OrderStatus.ACCEPTED));
+    }
+
+    @Test
+    void cancelPersistsCancelledOrderState() {
+        OrderStatePersistenceService stateSvc = mock(OrderStatePersistenceService.class);
+        matchingEngine.setOrderStatePersistenceService(stateSvc);
+
+        matchingEngine.processOrder(new Order.Builder()
+                .id("c1")
+                .symbol("BTC/USD")
+                .price(30000)
+                .quantity(1)
+                .orderSide(OrderSide.BUY)
+                .build());
+        matchingEngine.cancelOrder("c1");
+
+        verify(stateSvc).save(eq("c1"), eq("BTC/USD"), eq(OrderStatus.ACCEPTED));
+        verify(stateSvc).save(eq("c1"), eq("BTC/USD"), eq(OrderStatus.CANCELLED));
+    }
+
+    @Test
+    void getOrderStatusFallsBackToDatabaseWhenNotInMemory() {
+        OrderStatePersistenceService stateSvc = mock(OrderStatePersistenceService.class);
+        when(stateSvc.findStatus("gone")).thenReturn(Optional.of(OrderStatus.FILLED));
+        matchingEngine.setOrderStatePersistenceService(stateSvc);
+
+        assertEquals(OrderStatus.FILLED, matchingEngine.getOrderStatus("gone").orElseThrow());
+        verify(stateSvc, times(1)).findStatus("gone");
     }
 }

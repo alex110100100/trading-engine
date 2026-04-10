@@ -5,6 +5,7 @@ import com.alex.trading_engine.model.OrderStatus;
 import com.alex.trading_engine.model.Trade;
 import com.alex.trading_engine.persistence.OpenOrderEntity;
 import com.alex.trading_engine.persistence.OpenOrderPersistenceService;
+import com.alex.trading_engine.persistence.OrderStatePersistenceService;
 import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
 import lombok.Getter;
@@ -25,6 +26,7 @@ import java.util.stream.Collectors;
  *   <li>Operations for the same symbol are serialized to preserve deterministic matching.</li>
  *   <li>Order status and order-to-symbol index updates happen inside the same symbol lock.</li>
  *   <li>Open resting orders are synced to {@code open_orders} after each change (when persistence is enabled).</li>
+ *   <li>Order status is written to {@code order_states} when persistence is enabled so {@link #getOrderStatus(String)} can answer after a restart.</li>
  * </ul>
  */
 @Service
@@ -37,6 +39,7 @@ public class MatchingEngine {
     private final Map<String, String> orderToSymbol = new ConcurrentHashMap<>();
     private TradeRepository tradeRepository;
     private OpenOrderPersistenceService openOrderPersistenceService;
+    private OrderStatePersistenceService orderStatePersistenceService;
 
     @Autowired(required = false)
     void setTradeRepository(TradeRepository tradeRepository) {
@@ -46,6 +49,11 @@ public class MatchingEngine {
     @Autowired(required = false)
     void setOpenOrderPersistenceService(OpenOrderPersistenceService openOrderPersistenceService) {
         this.openOrderPersistenceService = openOrderPersistenceService;
+    }
+
+    @Autowired(required = false)
+    void setOrderStatePersistenceService(OrderStatePersistenceService orderStatePersistenceService) {
+        this.orderStatePersistenceService = orderStatePersistenceService;
     }
     
     private OrderBook bookFor(String symbol) {
@@ -65,6 +73,7 @@ public class MatchingEngine {
             persistNewTrades(book, tradeCountBefore);
             orderStatuses.put(result.orderId(), result.status());
             orderToSymbol.put(result.orderId(), symbol);
+            persistOrderState(result.orderId(), symbol, result.status());
             syncOpenOrdersForSymbol(symbol);
             return result;
         }
@@ -109,6 +118,7 @@ public class MatchingEngine {
                     : OrderStatus.ACCEPTED;
             orderStatuses.put(order.getId(), status);
             orderToSymbol.put(order.getId(), symbol);
+            persistOrderState(order.getId(), symbol, status);
         }
     }
 
@@ -146,6 +156,7 @@ public class MatchingEngine {
             }
             if (book.cancelOrder(orderId)) {
                 orderStatuses.put(orderId, OrderStatus.CANCELLED);
+                persistOrderState(orderId, symbol, OrderStatus.CANCELLED);
                 syncOpenOrdersForSymbol(symbol);
                 return true;
             }
@@ -153,11 +164,29 @@ public class MatchingEngine {
         }
     }
 
+    /**
+     * Returns status from memory if present; otherwise loads from {@code order_states} when JPA is enabled
+     * (e.g. {@code FILLED} or {@code CANCELLED} after a restart when the order is no longer in the book).
+     */
     public Optional<OrderStatus> getOrderStatus(String orderId) {
         if (orderId == null || orderId.isBlank()) {
             return Optional.empty();
         }
-        return Optional.ofNullable(orderStatuses.get(orderId));
+        OrderStatus inMemory = orderStatuses.get(orderId);
+        if (inMemory != null) {
+            return Optional.of(inMemory);
+        }
+        if (orderStatePersistenceService != null) {
+            return orderStatePersistenceService.findStatus(orderId);
+        }
+        return Optional.empty();
+    }
+
+    private void persistOrderState(String orderId, String symbol, OrderStatus status) {
+        if (orderStatePersistenceService == null) {
+            return;
+        }
+        orderStatePersistenceService.save(orderId, symbol, status);
     }
 
     /**
