@@ -8,11 +8,16 @@ import com.alex.trading_engine.persistence.OpenOrderPersistenceService;
 import com.alex.trading_engine.persistence.OrderStatePersistenceService;
 import com.alex.trading_engine.persistence.TradeEntity;
 import com.alex.trading_engine.persistence.TradeRepository;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.concurrent.TimeUnit;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -40,6 +45,7 @@ public class MatchingEngine {
     private TradeRepository tradeRepository;
     private OpenOrderPersistenceService openOrderPersistenceService;
     private OrderStatePersistenceService orderStatePersistenceService;
+    private MeterRegistry meterRegistry;
 
     @Autowired(required = false)
     void setTradeRepository(TradeRepository tradeRepository) {
@@ -55,7 +61,22 @@ public class MatchingEngine {
     void setOrderStatePersistenceService(OrderStatePersistenceService orderStatePersistenceService) {
         this.orderStatePersistenceService = orderStatePersistenceService;
     }
-    
+
+    @Autowired(required = false)
+    void setMeterRegistry(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    @PostConstruct
+    void registerBookMetrics() {
+        if (meterRegistry == null) {
+            return;
+        }
+        Gauge.builder("matching.engine.symbols.active", books, m -> (double) m.size())
+                .description("Count of symbols with an allocated order book (empty books still count)")
+                .register(meterRegistry);
+    }
+
     private OrderBook bookFor(String symbol) {
         return books.computeIfAbsent(symbol, s -> new OrderBook());
     }
@@ -67,21 +88,40 @@ public class MatchingEngine {
     public ProcessOrderResult processOrder(Order order) {
         String symbol = order.getSymbol();
         synchronized (lockForSymbol(symbol)) {
-            OrderBook book = bookFor(symbol);
-            int tradeCountBefore = book.getTrades().size();
-            ProcessOrderOutcome outcome = book.processOrder(order);
-            persistNewTrades(book, tradeCountBefore);
-            ProcessOrderResult result = outcome.incoming();
-            orderStatuses.put(result.orderId(), result.status());
-            orderToSymbol.put(result.orderId(), symbol);
-            persistOrderState(result.orderId(), symbol, result.status());
-            for (PassiveOrderStatusUpdate passive : outcome.passiveUpdates()) {
-                orderStatuses.put(passive.orderId(), passive.status());
-                orderToSymbol.put(passive.orderId(), passive.symbol());
-                persistOrderState(passive.orderId(), passive.symbol(), passive.status());
+            long startNanos = System.nanoTime();
+            ProcessOrderResult result = null;
+            int newTradeCount = 0;
+            try {
+                OrderBook book = bookFor(symbol);
+                int tradeCountBefore = book.getTrades().size();
+                ProcessOrderOutcome outcome = book.processOrder(order);
+                persistNewTrades(book, tradeCountBefore);
+                result = outcome.incoming();
+                newTradeCount = book.getTrades().size() - tradeCountBefore;
+                orderStatuses.put(result.orderId(), result.status());
+                orderToSymbol.put(result.orderId(), symbol);
+                persistOrderState(result.orderId(), symbol, result.status());
+                for (PassiveOrderStatusUpdate passive : outcome.passiveUpdates()) {
+                    orderStatuses.put(passive.orderId(), passive.status());
+                    orderToSymbol.put(passive.orderId(), passive.symbol());
+                    persistOrderState(passive.orderId(), passive.symbol(), passive.status());
+                }
+                syncOpenOrdersForSymbol(symbol);
+                return result;
+            } finally {
+                if (meterRegistry != null && result != null) {
+                    long elapsed = System.nanoTime() - startNanos;
+                    Timer.builder("matching.engine.process.order")
+                            .description("Time spent matching one order (lock held)")
+                            .tag("status", result.status().name())
+                            .register(meterRegistry)
+                            .record(elapsed, TimeUnit.NANOSECONDS);
+                    meterRegistry.counter("matching.engine.orders", "status", result.status().name()).increment();
+                    if (newTradeCount > 0) {
+                        meterRegistry.counter("matching.engine.trades.executed").increment(newTradeCount);
+                    }
+                }
             }
-            syncOpenOrdersForSymbol(symbol);
-            return result;
         }
     }
 
@@ -164,6 +204,9 @@ public class MatchingEngine {
                 orderStatuses.put(orderId, OrderStatus.CANCELLED);
                 persistOrderState(orderId, symbol, OrderStatus.CANCELLED);
                 syncOpenOrdersForSymbol(symbol);
+                if (meterRegistry != null) {
+                    meterRegistry.counter("matching.engine.cancels", "result", "success").increment();
+                }
                 return true;
             }
             return false;

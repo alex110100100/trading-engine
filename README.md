@@ -17,7 +17,6 @@ A small **Spring Boot** trading engine in Java: submit orders, match by **price�
 **Password — pick one:**
 
 1. **Environment variable** `DB_PASSWORD` (e.g. `.env` from `.env.example`, or PowerShell: `$env:DB_PASSWORD="…"`).
-
 2. **File** `application-local.properties` in the **project root** (gitignored), e.g. `spring.datasource.password=…`. Spring loads it automatically via `spring.config.import` (values there override earlier keys). Copy from `application-local.properties.example`.
 
 If Neon rotates the password or you change branch/host, update **URL** / **username** in `application.properties` to match the dashboard (JDBC string: `jdbc:postgresql://…`).
@@ -44,6 +43,21 @@ With the app running:
 
 - **[http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)**
 - **[http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)** (OpenAPI JSON)
+
+### Actuator & metrics
+
+**Spring Boot Actuator** is enabled:
+
+- **`GET /actuator/health`** — liveness-style status (includes JDBC when JPA is active).
+- **`GET /actuator/health/liveness`** and **`GET /actuator/health/readiness`** — Kubernetes-style probes (`management.endpoint.health.probes.enabled=true`).
+- **`GET /actuator/prometheus`** — text in **Prometheus exposition format** (for scrapers, not humans). Requires **`micrometer-registry-prometheus`** on the classpath (already in `pom.xml`).
+- **`GET /actuator/info`** — app metadata from `info.*` in `application.properties` (needs **`management.info.env.enabled=true`** in Spring Boot 3+, or the body is `{}`).
+- **`GET /actuator/metrics`** — JSON list of meter names; **`GET /actuator/metrics/{name}`** for a quick browser-friendly peek at one metric.
+
+The matching engine records **Micrometer** timers and counters: **`matching.engine.process.order`** (tagged by outcome **status**), **`matching.engine.orders`**, **`matching.engine.trades.executed`**, **`matching.engine.cancels`**, gauge **`matching.engine.symbols.active`**. In Prometheus text, dots become underscores — search for **`matching_engine_`**.
+
+**Graceful shutdown:** `server.shutdown=graceful` with a shutdown phase timeout so in-flight HTTP work can finish on SIGTERM.
+
 
 ### Example: submit order
 
@@ -102,8 +116,3 @@ Error body shape (`application/json`):
 - **Bids:** `TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>>` — **descending** key order (best bid first).
 - **Asks:** `TreeMap<BigDecimal, LinkedHashMap<String, BookEntry>>` — **ascending** key order (best ask first).
 - Each **`BookEntry`** tracks remaining quantity for partial fills.
-
-## Next steps (ideas)
-
-- **Metrics / health** (e.g. Spring Boot Actuator) for operability.
-
