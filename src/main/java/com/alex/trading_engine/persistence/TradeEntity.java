@@ -31,7 +31,7 @@ public class TradeEntity {
     @Column(nullable = false, precision = 19, scale = 8)
     private BigDecimal quantity;
 
-    @Column(nullable = false)
+    @Column(name = "executed_at", nullable = false)
     private Instant timestamp;
 
     protected TradeEntity() {
